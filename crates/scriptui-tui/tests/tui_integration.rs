@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use clap::error::ErrorKind;
+use clap::Parser;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -458,4 +460,12 @@ fn large_file_cached_analysis_and_viewport_render_responsiveness() {
         elapsed < Duration::from_millis(500),
         "10 scroll frames took {elapsed:?}, expected < 500ms"
     );
+}
+
+#[test]
+fn cli_version_matches_workspace_version() {
+    let err = Cli::try_parse_from(["scriptui", "--version"])
+        .expect_err("expected --version to exit with DisplayVersion");
+    assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+    assert_eq!(err.to_string().trim(), "scriptui 0.1.0");
 }

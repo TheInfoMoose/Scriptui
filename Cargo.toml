@@ -7,3 +7,12 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Retro-futuristic Ratatui text editor and Markdown IDE baseline"
+readme = "README.md"
+keywords = ["editor", "markdown", "tui", "terminal", "ratatui"]
+categories = ["text-editors", "command-line-utilities"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
