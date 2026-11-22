@@ -13,12 +13,14 @@
 **How to read this:** work goes strictly top to bottom through **Up Next**, one step at a time. The **#** column is the only order. Step IDs are kept because commits and notes cite them. A step whose "Waits on" names an Open Question or a **[USER]** action doesn't start until that's resolved.
 
 **Who runs what (phased workflow + Orrery `gemini-phased`):**
-- **Planner / Reviewer (Claude or review subagent)** writes the active phase (full step blocks to the zero-judgment bar), outlines future phases, and performs one phase review at the end of each phase using snapshot-backed step commits (`git show <sha>`).
+- **Phase planner (fresh Claude session, `/phase-plan`)** writes the active phase as **contract steps**: behavior, public interfaces, exact user-visible strings and test outcomes. Neon chooses the implementation; the planner never pre-writes code. Outlines future phases and stops for user approval before staging.
+- **Phase issue fixer (fresh Sonnet session, `/phase-issue`)** handles a phase that stopped early: diagnoses the deferral, amends gates or re-splits steps.
+- **Phase reviewer (fresh Opus session, `/phase-review`)** reviews the finished phase in its own session, from snapshot-backed step commits (`git show <sha>`). The planner never reviews its own phase.
 - **Orchestrator / Validator (Hydrogen / Orrery `agy-hydrogen-orch` + `agy-hydrogen-val`)** runs the phase. At the start of each step, `phased:step_start` (`scripts/phased-step.sh pregate` + `neb start` + `scripts/phased-step.sh start`) takes a repository snapshot. After Neon finishes, `phased:step_check` (`scripts/phased-step.sh check`) validates scope and `POST_GATE` strictly against that snapshot diff, the validator reads the diff, and `phased:step_commit` commits the step and closes its Nebulous task.
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 8):** Local, gate-verifiable `v0.1.0` release prep: add MIT `LICENSE`, complete Cargo workspace release metadata and `[profile.release]` tuning with verified release binary `--version` output (`STEP 8A`), and author `CHANGELOG.md` and update `README.md` with installation/release/license sections (`STEP 8B`). GitHub workflows moved to Phase 9.
+**Phase goal (Phase 8):** Local, gate-verifiable `v0.1.0` release prep, re-split from deferred 8A/8B: an MIT `LICENSE`, inherited Cargo release metadata and a tuned `[profile.release]` whose binary prints `scriptui 0.1.0` for `--version` (`STEP 8D`), then a `CHANGELOG.md` and README Installation / Releases / License sections (`STEP 8E`). GitHub workflows (deferred 8C) move to Phase 9.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,9 +28,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 8A** | `/goal` | release | `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `LICENSE` | — |
-| 2 | **STEP 8B** | `/goal` | docs | `CHANGELOG.md`, `README.md` | STEP 8A |
-| 3 | **STEP 8C** | `/goal` | ci | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | STEP 8B |
+| 1 | **STEP 8D** | `/goal` | release | `LICENSE`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `crates/scriptui-tui/tests/tui_integration.rs` | — |
+| 2 | **STEP 8E** | `/goal` | docs | `CHANGELOG.md`, `README.md` | STEP 8D |
 
 ### Completed
 
@@ -279,6 +280,114 @@ test -f LICENSE && test -f CHANGELOG.md
 
 [POST_GATE]
 python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml")); yaml.safe_load(open(".github/workflows/release.yml"))' && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 8D: MIT License, Release Metadata and Release Profile
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8D: Add an MIT LICENSE, inherited release metadata and a tuned [profile.release]; the release binary prints `scriptui 0.1.0` for --version (re-split of deferred STEP 8A).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - LICENSE (NEW)
+  - Cargo.toml
+  - crates/scriptui-core/Cargo.toml
+  - crates/scriptui-tui/Cargo.toml
+  - crates/scriptui-tui/tests/tui_integration.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/cli.rs:6-21 (Cli: `name = "scriptui"`, `version` already derived from CARGO_PKG_VERSION)
+  - crates/scriptui-tui/tests/tui_integration.rs:1-21 (imports; `Cli` is already imported from scriptui_tui)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. No dependency added, removed or version-changed (Cargo.lock must not change). No change to `[workspace.package] version`, `edition`, `license` or `description`. No `panic` key in any profile. No source file under `src/`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: The repo carries a standard MIT license, both crates inherit complete release metadata from the workspace, and `cargo build --release` produces an optimized, stripped `scriptui` binary whose `--version` output is exactly `scriptui 0.1.0`.
+
+Contract & Behavior:
+  1. `LICENSE` (new, repo root): the standard OSI MIT License text, unmodified. First line exactly `MIT License`. Copyright line exactly `Copyright (c) 2026 InfoMoose`.
+  2. `Cargo.toml` `[workspace.package]`: keep the four existing keys unchanged; add:
+     - `readme = "README.md"`
+     - `keywords = ["editor", "markdown", "tui", "terminal", "ratatui"]`
+     - `categories = ["text-editors", "command-line-utilities"]`
+  3. `Cargo.toml`: add a `[profile.release]` table with exactly these keys: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `strip = true`. Panic strategy stays the default (unwind).
+  4. `crates/scriptui-core/Cargo.toml` and `crates/scriptui-tui/Cargo.toml` `[package]`: keep existing keys; add `readme.workspace = true`, `keywords.workspace = true`, `categories.workspace = true`.
+  5. `crates/scriptui-tui/tests/tui_integration.rs`: add one integration test (below). Add any `use` it needs (e.g. `clap::Parser`, `clap::error::ErrorKind`); `clap` is already a normal dependency of scriptui-tui, so no Cargo change is needed for it.
+
+Must still work:
+  - `cargo build`, `cargo test --workspace` and every existing test in both crates, unchanged.
+  - Panic unwinding (terminal restore on panic relies on the default `panic = "unwind"`).
+  - `scriptui --help`, the `dict import` subcommand, `--theme` / `--locale` flags (cli.rs is not touched).
+  - Cargo.lock unchanged.
+
+Drops: none
+
+Tests:
+  - `cli_version_matches_workspace_version`: `Cli::try_parse_from(["scriptui", "--version"])` -> returns `Err(e)` with `e.kind() == ErrorKind::DisplayVersion`, and `e.to_string().trim()` equals `"scriptui 0.1.0"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qx 'MIT License' LICENSE && grep -qx 'Copyright (c) 2026 InfoMoose' LICENSE && grep -qx '\[profile.release\]' Cargo.toml && grep -qx 'lto = true' Cargo.toml && grep -qx 'strip = true' Cargo.toml && grep -qx 'keywords.workspace = true' crates/scriptui-core/Cargo.toml && grep -qx 'keywords.workspace = true' crates/scriptui-tui/Cargo.toml && grep -q 'fn cli_version_matches_workspace_version' crates/scriptui-tui/tests/tui_integration.rs && test "$(cargo run --release -q -p scriptui-tui -- --version)" = 'scriptui 0.1.0'
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 8E: CHANGELOG and README Installation, Releases and License
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8E: Add CHANGELOG.md with the 0.1.0 entry and add Installation, Releases and License sections to README.md (re-split of deferred STEP 8B).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - CHANGELOG.md (NEW)
+  - README.md
+READ_ONLY_REFS:
+  - README.md (all sections: the CHANGELOG lists only features documented here)
+  - LICENSE (added by STEP 8D)
+  - Cargo.toml ([workspace.package] version, [profile.release])
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. No existing README section's heading or text is changed, reordered or removed. No URLs to this project's GitHub repository (none is configured yet).
+
+[PRE_GATE]
+test -f LICENSE && grep -qx '\[profile.release\]' Cargo.toml
+
+[MUTATION_SPEC]
+Goal: A reader can see what 0.1.0 contains, how to install `scriptui`, how releases are versioned, and that the project is MIT-licensed.
+
+Contract & Behavior:
+  1. `CHANGELOG.md` (new, repo root), Keep a Changelog 1.1.0 style:
+     - Line 1 exactly `# Changelog`.
+     - A short intro stating the format follows Keep a Changelog and the project uses Semantic Versioning.
+     - `## [Unreleased]` heading with no entries.
+     - `## [0.1.0] - 2026-11-22` heading (date is a placeholder; Phase 13 re-stamps it to the tag date), followed by `### Added` with one bullet per user-facing feature area the README documents: CUA editing with undo/redo and auto-indent, multiple buffers, find/replace (regex) and multi-cursor, GFM Markdown live preview, syntax highlighting, Hunspell spellcheck with bundled `en_US` and `scriptui dict import`, built-in and custom themes, mouse support, CLI options and the configuration file. No feature the README does not document.
+     - No link reference definitions (no repository URL exists yet).
+  2. `README.md`: insert three new top-level sections; existing content stays byte-identical:
+     - `## Installation`, placed directly after the `## Architecture` section and before `## Quick Start`. States that a Rust stable toolchain (via rustup) is required; shows a `bash` fenced block containing exactly `cargo install --path crates/scriptui-tui --locked`; says this installs the `scriptui` binary into `~/.cargo/bin`; shows `scriptui --version` printing `scriptui 0.1.0`. States that prebuilt binaries for Linux x86_64 (`x86_64-unknown-linux-gnu`) and macOS Apple Silicon (`aarch64-apple-darwin`) are planned for GitHub releases; must not claim they are available now.
+     - `## Releases`, placed after `## Development & Verification`. States versions follow Semantic Versioning, release builds use the tuned `[profile.release]` (LTO, single codegen unit, stripped), and changes are recorded in `CHANGELOG.md` (relative link `[CHANGELOG.md](CHANGELOG.md)`).
+     - `## License`, the last section of the file. States the project is licensed under the MIT License, with relative link `[LICENSE](LICENSE)`.
+
+Must still work:
+  - Every existing README section (Architecture through Development & Verification), including the `cargo build --release` comment naming `target/release/scriptui` and the verification commands.
+  - Base gate passes (docs-only change).
+
+Drops: none
+
+Tests:
+  - None in Rust (docs-only step). POST_GATE greps verify every required heading and the install command.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qx '# Changelog' CHANGELOG.md && grep -qx '## \[Unreleased\]' CHANGELOG.md && grep -qx '## \[0.1.0\] - 2026-11-22' CHANGELOG.md && grep -qx '### Added' CHANGELOG.md && grep -qx '## Installation' README.md && grep -qx '## Releases' README.md && grep -qx '## License' README.md && grep -qx 'cargo install --path crates/scriptui-tui --locked' README.md && grep -q '\[LICENSE\](LICENSE)' README.md && grep -q '\[CHANGELOG.md\](CHANGELOG.md)' README.md && test "$(grep '^## ' README.md | tail -n 1)" = '## License' && test "$(grep -n '^## ' README.md | grep -A1 '## Architecture' | tail -n 1 | cut -d: -f2)" = '## Installation'
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

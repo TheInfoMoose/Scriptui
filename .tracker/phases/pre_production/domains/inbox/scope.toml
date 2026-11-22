@@ -398,3 +398,17 @@ title = "Amend STEP 8A POST_GATE release binary path for CARGO_TARGET_DIR"
 status = "closed"
 severity = "high"
 created_at = "2026-11-22T17:41:07Z"
+
+[[items.tasks]]
+id = "TASK-0046"
+title = "release"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T21:57:53Z"
+
+[[items.tasks]]
+id = "TASK-0047"
+title = "docs"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T21:57:53Z"

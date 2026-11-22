@@ -3,13 +3,9 @@
 phase = "8"
 
 [[queue]]
-step = "8A"
-item = "TASK-0042"
+step = "8D"
+item = "TASK-0046"
 
 [[queue]]
-step = "8B"
-item = "TASK-0043"
-
-[[queue]]
-step = "8C"
-item = "TASK-0044"
+step = "8E"
+item = "TASK-0047"
