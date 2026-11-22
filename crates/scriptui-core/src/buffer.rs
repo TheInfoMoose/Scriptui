@@ -23,6 +23,7 @@ pub struct DocumentBuffer {
     dirty: bool,
     last_disk_mtime: Option<SystemTime>,
     selection: SelectionSet,
+    revision: u64,
 }
 
 impl DocumentBuffer {
@@ -33,6 +34,7 @@ impl DocumentBuffer {
             dirty: false,
             last_disk_mtime: None,
             selection: SelectionSet::point(0),
+            revision: 0,
         }
     }
 
@@ -43,6 +45,7 @@ impl DocumentBuffer {
             dirty: false,
             last_disk_mtime: None,
             selection: SelectionSet::point(0),
+            revision: 0,
         }
     }
 
@@ -61,6 +64,7 @@ impl DocumentBuffer {
             dirty: false,
             last_disk_mtime,
             selection: SelectionSet::point(0),
+            revision: 0,
         })
     }
 
@@ -153,6 +157,10 @@ impl DocumentBuffer {
 
     pub fn set_dirty(&mut self, dirty: bool) {
         self.dirty = dirty;
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn len_chars(&self) -> usize {
@@ -254,6 +262,13 @@ impl DocumentBuffer {
         self.selection = SelectionSet::from_ranges(new_ranges);
         self.selection.clamp(self.len_chars());
         self.dirty = true;
+        if !edits.is_empty()
+            && edits
+                .iter()
+                .any(|edit| edit.start < edit.end || !text.is_empty())
+        {
+            self.revision = self.revision.wrapping_add(1);
+        }
         edits
     }
 
@@ -308,6 +323,7 @@ impl DocumentBuffer {
         self.selection.clamp(self.len_chars());
         if !edits.is_empty() {
             self.dirty = true;
+            self.revision = self.revision.wrapping_add(1);
         }
         edits
     }
@@ -333,6 +349,7 @@ impl DocumentBuffer {
         }
         self.selection.clamp(self.len_chars());
         self.dirty = true;
+        self.revision = self.revision.wrapping_add(1);
 
         Ok(BufferEdit {
             start,
@@ -404,5 +421,26 @@ mod tests {
         let buf = DocumentBuffer::from_str_content("abc\ndef\nghi");
         assert_eq!(buf.char_to_position(5), Position { line: 1, col: 1 });
         assert_eq!(buf.position_to_char(Position { line: 2, col: 2 }), 10);
+    }
+
+    #[test]
+    fn document_revision_increments_on_content_mutations() {
+        let mut buf = DocumentBuffer::from_str_content("hello");
+        assert_eq!(buf.revision(), 0);
+
+        buf.set_selection(SelectionSet::point(5));
+        assert_eq!(buf.revision(), 0);
+
+        let _ = buf.apply_insert(" world");
+        assert_eq!(buf.revision(), 1);
+
+        let _ = buf.apply_delete(true);
+        assert_eq!(buf.revision(), 2);
+
+        let _ = buf.apply_raw_edit(0, 5, "hi").unwrap();
+        assert_eq!(buf.revision(), 3);
+
+        buf.set_selection(SelectionSet::point(0));
+        assert_eq!(buf.revision(), 3);
     }
 }

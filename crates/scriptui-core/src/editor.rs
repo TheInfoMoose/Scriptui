@@ -416,6 +416,14 @@ impl EditorState {
         });
 
         self.update_find_matches()?;
+        if !self.find_replace.matches.is_empty() {
+            self.find_replace.active_match = self
+                .find_replace
+                .matches
+                .iter()
+                .position(|next| next.start >= new_caret)
+                .or(Some(0));
+        }
         Ok(true)
     }
 
@@ -1166,5 +1174,35 @@ mod tests {
         editor.confirm_dirty_action(true);
         assert_eq!(editor.overlay, OverlayMode::None);
         assert!(editor.should_quit);
+    }
+
+    #[test]
+    fn replace_active_match_advances_past_overlapping_replacement() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("foo bar foo baz foo");
+        editor.find_replace.query = SearchQuery::plain("foo");
+        editor.find_replace.replacement = "foobar".to_string();
+
+        assert!(editor.replace_active_match().unwrap());
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "foobar bar foo baz foo"
+        );
+        assert_eq!(editor.find_replace.active_match, Some(1));
+        assert_eq!(
+            editor.find_replace.matches[1],
+            SearchMatch { start: 11, end: 14 }
+        );
+
+        assert!(editor.replace_active_match().unwrap());
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "foobar bar foobar baz foo"
+        );
+        assert_eq!(editor.find_replace.active_match, Some(2));
+        assert_eq!(
+            editor.find_replace.matches[2],
+            SearchMatch { start: 22, end: 25 }
+        );
     }
 }
