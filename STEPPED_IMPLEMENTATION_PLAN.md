@@ -18,7 +18,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 1):** Establish the decoupled `scriptui-core` Cargo workspace with `ropey`-backed document buffer, multi-cursor selection model, transactional undo/redo, native indentation (with prose-safe smart GFM continuation), search with select-all/replace-all, and retro-futuristic TOML theme/config system defaulting to the CRT Amber palette.
+**Phase goal (Phase 2):** Implement full GitHub Flavored Markdown (GFM) AST parsing and live editor highlighting (`comrak` + `syntect`), the GFM preview IR with bidirectional scroll synchronization, and the Markdown-aware pure-Rust Hunspell spellcheck engine (`spellbook`) with bundled `en_US` and external `.dic`/`.aff` locale ingestion.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -26,28 +26,27 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 1A** | `/goal` | core | `Cargo.toml`, `Cargo.lock`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-core/src/lib.rs`, `crates/scriptui-core/src/error.rs`, `crates/scriptui-core/src/selection.rs` | — |
-| 2 | **STEP 1B** | `/goal` | buffer | `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/lib.rs` | STEP 1A |
-| 3 | **STEP 1C** | `/goal` | history | `crates/scriptui-core/src/history.rs`, `crates/scriptui-core/src/lib.rs` | STEP 1B |
-| 4 | **STEP 1D** | `/goal` | indent | `crates/scriptui-core/src/indent.rs`, `crates/scriptui-core/src/lib.rs` | STEP 1B |
-| 5 | **STEP 1E** | `/goal` | search | `crates/scriptui-core/src/search.rs`, `crates/scriptui-core/src/lib.rs` | STEP 1B |
-| 6 | **STEP 1F** | `/goal` | theme | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/src/config.rs`, `crates/scriptui-core/src/lib.rs` | STEP 1A |
+| 1 | **STEP 2A** | `/goal` | markdown | `crates/scriptui-core/Cargo.toml`, `Cargo.lock`, `crates/scriptui-core/src/error.rs`, `crates/scriptui-core/src/markdown.rs`, `crates/scriptui-core/src/lib.rs` | — |
+| 2 | **STEP 2B** | `/goal` | highlight | `crates/scriptui-core/src/highlight.rs`, `crates/scriptui-core/src/lib.rs` | STEP 2A |
+| 3 | **STEP 2C** | `/goal` | preview | `crates/scriptui-core/src/preview.rs`, `crates/scriptui-core/src/lib.rs` | STEP 2B |
+| 4 | **STEP 2D** | `/goal` | spell | `crates/scriptui-core/assets/dicts/en_US.aff`, `crates/scriptui-core/assets/dicts/en_US.dic`, `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/lib.rs` | STEP 2A |
+| 5 | **STEP 2E** | `/goal` | theme | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/tests/markdown_spell_pipeline.rs` | STEP 2C, STEP 2D |
 
 ### Completed
 
 | Step ID | Status | Command | Scope | Target Files |
 | :--- | :---: | :---: | :--- | :--- |
+| **STEP 1A** | Done (`5997d28`) | `/goal` | core | `Cargo.toml`, `Cargo.lock`, `crates/scriptui-core/Cargo.toml`, `lib.rs`, `error.rs`, `selection.rs` |
+| **STEP 1B** | Done (`be17f82`) | `/goal` | buffer | `crates/scriptui-core/src/buffer.rs`, `lib.rs` |
+| **STEP 1C** | Done (`e47c1dc`) | `/goal` | history | `crates/scriptui-core/src/history.rs`, `lib.rs` |
+| **STEP 1D** | Done (`38ecf17`) | `/goal` | indent | `crates/scriptui-core/src/indent.rs`, `lib.rs` |
+| **STEP 1E** | Done (`24ccfa5`) | `/goal` | search | `crates/scriptui-core/src/search.rs`, `lib.rs` |
+| **STEP 1F** | Done (`e63dd3b`) | `/goal` | theme | `crates/scriptui-core/src/theme.rs`, `config.rs`, `lib.rs` |
 
 ### Future phases
 
 Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write` and `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase).
 
-- **Phase 2: Full GFM Markdown AST, Live Highlighting, Preview IR & Spellcheck Engine (`scriptui-core`)**
-  - `comrak`-backed GFM parser & `sourcepos` span mapper (headings H1–H6, emphasis/strong/strikethrough, links/autolinks, tables, task lists, footnotes, alerts/callouts, nested blockquotes, hard line breaks, horizontal rules, YAML frontmatter)
-  - `syntect` fenced code-block syntax highlighter mapped onto `ThemePalette` semantic tokens
-  - Live editor per-line styled span synthesizer (combining GFM tokens, search matches, multi-cursor selections, and spellcheck underlines)
-  - Preview document IR builder & bidirectional source-line-to-preview-line scroll synchronization map
-  - Pure-Rust Hunspell spellcheck engine (`spellbook`) with bundled `en_US` `.dic`/`.aff`, Markdown-aware AST skip spans, ranked suggestions, personal dictionary persistence, and XDG/CLI locale ingestion
 - **Phase 3: Multi-Buffer State Machine, Keymap & Soft-Wrap Layout (`scriptui-core`)**
   - Data-driven `Keymap` & `Action` enum (modeless CUA defaults: `Ctrl+S`, `Ctrl+F`, `Ctrl+H`, `Ctrl+Shift+L`, `Ctrl+Z`/`Y`, `Ctrl+P`/`F1`, `Ctrl+.`, `Shift+Arrows`, `Tab`/`Shift+Tab`, preview/wrap toggles)
   - `BufferManager` (multi-buffer tabs, open/new/close/switch, dirty-buffer exit guard, external file-change reload state)
@@ -442,6 +441,278 @@ grep -qE 'pub enum ScriptuiError\b' crates/scriptui-core/src/error.rs && grep -q
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct ThemePalette\b' crates/scriptui-core/src/theme.rs && grep -qE 'pub const DEFAULT_CRT_AMBER_TOML\b' crates/scriptui-core/src/theme.rs && grep -qE 'pub struct AppConfig\b' crates/scriptui-core/src/config.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 2 Step Blocks
+
+### STEP 2A: GFM Markdown AST Parser, Span Mapper, and Spell-Skip Ranges
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2A: Add comrak, syntect (pure-Rust default-fancy), and spellbook dependencies to scriptui-core, extend ScriptuiError, and implement full GFM AST parsing and spell-skip range extraction in crates/scriptui-core/src/markdown.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/Cargo.toml
+  - Cargo.lock
+  - crates/scriptui-core/src/error.rs
+  - crates/scriptui-core/src/markdown.rs (NEW)
+  - crates/scriptui-core/src/lib.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/error.rs:1-30 (ScriptuiError)
+  - crates/scriptui-core/src/lib.rs:1-20 (module declarations)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No TUI crates (ratatui, crossterm, clap) in Cargo.toml.
+  - No C-based oniguruma feature on syntect (must use default-features = false, features = ["default-fancy"]).
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct ThemePalette\b' crates/scriptui-core/src/theme.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/Cargo.toml — add under `[dependencies]`:
+   - `comrak = { version = "0.29", default-features = false }`
+   - `syntect = { version = "5", default-features = false, features = ["default-fancy"] }`
+   - `spellbook = "0.4"`
+2. crates/scriptui-core/src/error.rs — add two variants to `ScriptuiError`:
+   - `InvalidLocale(String)` (`#[error("invalid locale identifier: {0}")]`)
+   - `SpellDict { locale: String, reason: String }` (`#[error("spell dictionary error for '{locale}': {reason}")]`)
+3. crates/scriptui-core/src/lib.rs — add `pub mod markdown;` and `pub use markdown::{CodeBlockRegion, GfmDocument, MdSpan, MdTokenKind, parse_gfm};`.
+4. crates/scriptui-core/src/markdown.rs (NEW) — implement:
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] pub enum MdTokenKind` with variants: `Heading(u8)`, `Emphasis`, `Strong`, `Strikethrough`, `Link`, `InlineCode`, `CodeBlock`, `BlockQuote`, `ListMarker`, `TaskChecked`, `TaskUnchecked`, `Table`, `ThematicBreak`, `AlertNote`, `AlertTip`, `AlertImportant`, `AlertWarning`, `AlertCaution`, `Footnote`, `FrontMatter`, `Html`, `HardBreak`.
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct MdSpan { pub start_line: usize, pub start_col: usize, pub end_line: usize, pub end_col: usize, pub kind: MdTokenKind }` (0-based line numbers and 0-based byte column offsets within their respective lines; inclusive `end_line`, exclusive `end_col`).
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct CodeBlockRegion { pub start_line: usize, pub end_line: usize, pub language: String }` (0-based inclusive line range of fenced code block body + info string language).
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct GfmDocument { pub spans: Vec<MdSpan>, pub code_blocks: Vec<CodeBlockRegion>, pub spell_skip_byte_ranges: Vec<std::ops::Range<usize>> }` with helper methods:
+     - `pub fn is_line_in_code_block(&self, line: usize) -> Option<&CodeBlockRegion>`
+     - `pub fn spans_for_line(&self, line: usize) -> Vec<MdSpan>`
+   - `pub fn gfm_options<'a>() -> comrak::Options<'a>`: enables GFM extensions (`strikethrough = true`, `table = true`, `autolink = true`, `tasklist = true`, `footnotes = true`, `alerts = true`, `front_matter_delimiter = Some("---".to_string())`, `tagfilter = true`).
+   - `pub fn parse_gfm(markdown: &str) -> GfmDocument`:
+     - Parses `markdown` with `comrak::Arena::new()` and `comrak::parse_document(&arena, markdown, &gfm_options())`.
+     - Precomputes 0-based line start byte offsets so `comrak` 1-based `(line, column)` `sourcepos` converts accurately to 0-based `MdSpan` and document byte ranges `Range<usize>`.
+     - Walks the AST collecting `MdSpan` entries for headings (level 1..=6), emphasis, strong, strikethrough, links, inline code, code blocks (also populating `CodeBlockRegion`), blockquotes, list items, task items (`Some('x' | 'X')` → `TaskChecked`, `None` → `TaskUnchecked`), tables, thematic breaks, GFM alerts (`Note`, `Tip`, `Important`, `Warning`, `Caution`), footnote definitions/references, front matter, raw HTML, and line breaks (`HardBreak`).
+     - Populates `spell_skip_byte_ranges` (sorted and merged non-overlapping byte ranges) covering all `CodeBlock`, `InlineCode`, `FrontMatter`, `Html`, and `Link` URL destinations (or full autolinks).
+5. Tests in `crates/scriptui-core/src/markdown.rs` (`#[cfg(test)] mod tests`):
+   - `parse_gfm_extracts_all_major_features`: parses a fixture containing YAML frontmatter (`---\ntitle: Test\n---`), `# H1`, `**bold** *italic* ~~strike~~`, `- [x] done`, `> [!WARNING]\n> watch out`, a 2x2 GFM table, a fenced `rust` code block, a hard line break (`line1  \nline2`), and a link `[site](https://example.com)`; asserts `MdTokenKind::FrontMatter`, `Heading(1)`, `Strong`, `Emphasis`, `Strikethrough`, `TaskChecked`, `AlertWarning`, `Table`, `CodeBlock`, `HardBreak`, and `Link` are all present in `doc.spans`, and `doc.code_blocks` has `language == "rust"`.
+   - `spell_skip_ranges_cover_code_frontmatter_and_urls`: parses a document with frontmatter, inline code `` `foo_bar` ``, a fenced code block containing `"misspelled_ident"`, and `"Visit https://example.com/typo now"`; asserts the byte offsets of `"foo_bar"`, `"misspelled_ident"`, and `"https://example.com/typo"` fall inside `doc.spell_skip_byte_ranges`, while `"Visit"` does not.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct GfmDocument\b' crates/scriptui-core/src/markdown.rs && grep -qE 'pub fn parse_gfm\b' crates/scriptui-core/src/markdown.rs && grep -qE 'pub enum MdTokenKind\b' crates/scriptui-core/src/markdown.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2B: Syntect Code Highlighter and Per-Line Editor Span Synthesizer
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2B: Implement syntect fenced code-block highlighting mapped to ThemePalette and per-line editor StyledSegment synthesis in crates/scriptui-core/src/highlight.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/highlight.rs (NEW)
+  - crates/scriptui-core/src/lib.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/markdown.rs:1-120 (GfmDocument, MdSpan, MdTokenKind, CodeBlockRegion)
+  - crates/scriptui-core/src/theme.rs:1-70 (RgbColor, Theme, ThemePalette)
+  - crates/scriptui-core/src/search.rs:25-35 (SearchMatch)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No ratatui imports in scriptui-core.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct GfmDocument\b' crates/scriptui-core/src/markdown.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/src/lib.rs — add `pub mod highlight;` and `pub use highlight::{CodeHighlighter, LineOverlay, StyleFlags, StyledSegment, highlight_editor_line, style_for_md_token};`.
+2. crates/scriptui-core/src/highlight.rs (NEW) — implement:
+   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub struct StyleFlags { pub bold: bool, pub italic: bool, pub underline: bool, pub dim: bool, pub strikethrough: bool }`
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct StyledSegment { pub text: String, pub fg: RgbColor, pub bg: Option<RgbColor>, pub flags: StyleFlags }`
+   - `#[derive(Debug, Clone, Default)] pub struct LineOverlay { pub selection_cols: Vec<std::ops::Range<usize>>, pub search_match_cols: Vec<std::ops::Range<usize>>, pub active_search_col: Option<std::ops::Range<usize>>, pub spell_error_cols: Vec<std::ops::Range<usize>> }` (0-based char column ranges on a single line).
+   - `pub fn style_for_md_token(kind: MdTokenKind, palette: &ThemePalette) -> (RgbColor, StyleFlags)` mapping every `MdTokenKind` variant to its semantic `ThemePalette` color and flags (e.g., `Heading(1)` → `palette.md_h1` + bold, `Heading(2)` → `palette.md_h2` + bold, `Heading(_)` → `palette.md_h3` + bold, `Strong` → `palette.md_strong` + bold, `Emphasis` → `palette.md_emphasis` + italic, `Strikethrough` → `palette.md_strikethrough` + strikethrough, `Link` → `palette.md_link` + underline, `InlineCode` → `palette.md_code_inline`, `CodeBlock` → `palette.md_code_block`, `BlockQuote` → `palette.md_blockquote` + italic, `AlertNote` → `palette.md_alert_note` + bold, `AlertTip` → `palette.md_alert_tip` + bold, `AlertImportant` → `palette.accent` + bold, `AlertWarning` → `palette.md_alert_warning` + bold, `AlertCaution` → `palette.md_alert_caution` + bold, `Table` → `palette.md_table_border`, `ThematicBreak` → `palette.md_hr`, `ListMarker | TaskChecked | TaskUnchecked` → `palette.md_list_marker`, `FrontMatter | Html | Footnote | HardBreak` → `palette.muted`).
+   - `pub struct CodeHighlighter { syntax_set: syntect::parsing::SyntaxSet }` with:
+     - `pub fn new() -> Self` (`SyntaxSet::load_defaults_newlines()`) and `impl Default for CodeHighlighter`
+     - `pub fn highlight_block(&self, language: &str, lines: &[&str], palette: &ThemePalette) -> Vec<Vec<StyledSegment>>` (uses `find_syntax_by_token(language)` falling back to `find_syntax_plain_text()`; parses scopes per line with `syntect::parsing::ParseState` + `ScopeStack` and maps scope categories—comments → `palette.muted` + italic, strings → `palette.md_alert_tip`, keywords/storage → `palette.accent` + bold, constants/numbers → `palette.md_alert_warning`, functions/types → `palette.md_code_inline`, fallback → `palette.md_code_block`—into `StyledSegment`s).
+   - `pub fn highlight_editor_line(line_idx: usize, line_text: &str, doc: &GfmDocument, theme: &Theme, overlay: &LineOverlay) -> Vec<StyledSegment>`:
+     - Splits `line_text` at char boundaries derived from `doc.spans_for_line(line_idx)` and all `overlay` ranges, coalescing adjacent identical styles.
+     - Applies base `theme.palette.foreground`, overrides with GFM token style, then layers overlay backgrounds (`search_match_bg`, `search_active_bg`, `selection_bg` highest priority) and `spell_error` (`fg = theme.palette.spell_error`, `flags.underline = true`).
+3. Tests in `crates/scriptui-core/src/highlight.rs` (`#[cfg(test)] mod tests`):
+   - `code_highlighter_styles_rust_tokens_on_crt_amber`: highlights `["fn main() {", "    // note", "    let s = \"hi\";", "}"]` with language `"rust"` and `default_theme().unwrap().palette`; asserts total concatenated text per line matches input, `"fn"` gets `palette.accent` + bold, `"// note"` gets `palette.muted` + italic, and `"\"hi\""` gets `palette.md_alert_tip`.
+   - `editor_line_layers_gfm_selection_and_spell_error`: parses `"# Hello wrld"` with `parse_gfm`, overlays `spell_error_cols: vec![8..12]` and `selection_cols: vec![2..7]`, runs `highlight_editor_line`; asserts concatenated segment text equals `"# Hello wrld"`, `"Hello"` has `bg == Some(theme.palette.selection_bg)`, and `"wrld"` has `fg == theme.palette.spell_error` and `flags.underline == true`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct CodeHighlighter\b' crates/scriptui-core/src/highlight.rs && grep -qE 'pub fn highlight_editor_line\b' crates/scriptui-core/src/highlight.rs && grep -qE 'pub fn style_for_md_token\b' crates/scriptui-core/src/highlight.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2C: Full GFM Preview Document IR and Bidirectional Scroll-Sync Map
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2C: Implement full GFM PreviewDocument IR renderer and bidirectional source-to-preview scroll synchronization in crates/scriptui-core/src/preview.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/preview.rs (NEW)
+  - crates/scriptui-core/src/lib.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/markdown.rs:1-120 (gfm_options)
+  - crates/scriptui-core/src/highlight.rs:1-100 (CodeHighlighter, StyleFlags, StyledSegment)
+  - crates/scriptui-core/src/theme.rs:1-70 (RgbColor, Theme, ThemePalette)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No ratatui imports in scriptui-core.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub struct CodeHighlighter\b' crates/scriptui-core/src/highlight.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/src/lib.rs — add `pub mod preview;` and `pub use preview::{PreviewDocument, PreviewLine, build_preview};`.
+2. crates/scriptui-core/src/preview.rs (NEW) — implement:
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct PreviewLine { pub source_line: usize, pub segments: Vec<StyledSegment> }` (0-based originating Markdown `source_line` for scroll sync).
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct PreviewDocument { pub lines: Vec<PreviewLine> }` with methods:
+     - `pub fn source_line_to_preview_line(&self, source_line: usize) -> usize` (returns the first preview line index whose `line.source_line >= source_line`, or `self.lines.len().saturating_sub(1)` if none).
+     - `pub fn preview_line_to_source_line(&self, preview_line: usize) -> usize` (returns `self.lines.get(preview_line)`'s `source_line`, or the last line's `source_line`, or `0` if empty).
+     - `pub fn plain_lines(&self) -> Vec<String>` (joins each `PreviewLine`'s segment texts into a plain string for testing and search).
+   - `pub fn build_preview(markdown: &str, theme: &Theme, width: usize) -> PreviewDocument`:
+     - Uses `comrak::parse_document` with `gfm_options()` and `CodeHighlighter::new()`, clamping effective `width` to `width.max(20)`.
+     - Renders all GFM constructs into `PreviewLine`s with `theme.palette` styling:
+       - **Headings (H1–H6):** styled with `md_h1`/`md_h2`/`md_h3` + bold, H1/H2 followed by a subtle rule (`━` for H1, `─` for H2).
+       - **Paragraphs & Hard Line Breaks:** word-wrapped to `width`, honoring GFM `LineBreak` (`\n` split) and inline formatting (`Strong`, `Emphasis`, `Strikethrough`, `Code`, `Link` rendering label + dimmed URL).
+       - **Blockquotes & GFM Alerts (`> [!NOTE|TIP|IMPORTANT|WARNING|CAUTION]`):** vertical bar prefix `│ ` (nested for nested blockquotes), alert header banner (`[NOTE]`, `[TIP]`, `[IMPORTANT]`, `[WARNING]`, `[CAUTION]`) styled with the matching `md_alert_*` color.
+       - **Lists & Task Lists:** unordered (`• `), ordered (`1. `), task checkboxes (`[x] ` / `[ ] `) with nested indentation.
+       - **Fenced Code Blocks:** framed with top/bottom borders (`┌─ <lang> ─…` / `└─…`) and syntax-highlighted lines via `CodeHighlighter::highlight_block`.
+       - **GFM Tables:** column-width calculation and Unicode box-drawing borders (`┌─┬─┐`, `│ │ │`, `├─┼─┤`, `└─┴─┘`) honoring column alignment (`Left`, `Center`, `Right`).
+       - **Horizontal Rules (`ThematicBreak`):** `─`.repeat(width).
+       - **Footnotes:** inline `[1]` reference and bottom footnote definition section.
+3. Tests in `crates/scriptui-core/src/preview.rs` (`#[cfg(test)] mod tests`):
+   - `preview_renders_tables_tasks_alerts_code_and_breaks`: renders a GFM document with `# Title`, `> [!TIP]\n> helpful`, `- [x] done`, a 2-column table (`| A | B |\n|---|---|\n| 1 | 2 |`), a `rust` fenced code block, and `line1  \nline2`; asserts `plain_lines()` contains `"Title"`, `"[TIP]"`, `"[x]"`, `"┌"`, `"│"`, `"rust"`, and separate lines containing `"line1"` and `"line2"`.
+   - `preview_scroll_sync_maps_source_and_preview_lines`: builds preview for a 3-section Markdown document separated by blank lines; asserts `source_line_to_preview_line` is monotonically non-decreasing and `preview_line_to_source_line(doc.source_line_to_preview_line(src)) >= src` for the heading source lines.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct PreviewDocument\b' crates/scriptui-core/src/preview.rs && grep -qE 'pub fn build_preview\b' crates/scriptui-core/src/preview.rs && grep -qE 'pub fn source_line_to_preview_line\b' crates/scriptui-core/src/preview.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2D: Pure-Rust Hunspell Spellcheck Engine with Bundled en_US and Locale Ingestion
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2D: Bundle default en_US Hunspell assets and implement Markdown-aware SpellEngine, PersonalDictionary, and external locale ingestion in crates/scriptui-core/src/spell.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/assets/dicts/en_US.aff (NEW)
+  - crates/scriptui-core/assets/dicts/en_US.dic (NEW)
+  - crates/scriptui-core/src/spell.rs (NEW)
+  - crates/scriptui-core/src/lib.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/error.rs:1-40 (ScriptuiError::InvalidLocale, SpellDict, Io)
+  - crates/scriptui-core/src/markdown.rs:1-90 (GfmDocument::spell_skip_byte_ranges)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No network calls or system hunspell C library linkage.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'InvalidLocale\b' crates/scriptui-core/src/error.rs && grep -qE 'pub struct GfmDocument\b' crates/scriptui-core/src/markdown.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/assets/dicts/en_US.aff (NEW) — valid UTF-8 Hunspell affix file (`SET UTF-8`, `TRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ'`, plus standard suffix/prefix rules `SFX S` plural, `SFX D` past tense, `SFX G` gerund, `SFX R` comparative, `PFX U` un-).
+2. crates/scriptui-core/assets/dicts/en_US.dic (NEW) — valid UTF-8 Hunspell dictionary file starting with an accurate entry count line and at least 250 common English prose, editing, and Markdown words (with affix flags `/S`, `/D`, `/G` where appropriate, including words used in tests: `hello`, `world`, `editor`, `markdown`, `document`, `section`, `paragraph`, `amber`, `screen`, `search`, `replace`, `preview`, `indent`, `bullet`, `quote`, `table`, `check`, `spell`, `locale`, `theme`, `color`, `quick`, `brown`, `fox`, `jumps`, `over`, `lazy`, `dog`, `the`, `and`, `for`, `with`, `this`, `that`, `from`, `have`, `note`, `warning`, `code`, `block`, `line`, `file`, `save`, `open`, `text`).
+3. crates/scriptui-core/src/lib.rs — add `pub mod spell;` and `pub use spell::{PersonalDictionary, SpellDiagnostic, SpellEngine, import_locale_files, validate_locale_name};`.
+4. crates/scriptui-core/src/spell.rs (NEW) — implement:
+   - `pub const DEFAULT_LOCALE: &str = "en_US";`
+   - `pub fn validate_locale_name(locale: &str) -> ScriptuiResult<()>` (requires non-empty ASCII alphanumeric plus `_` or `-`, length `<= 32`, rejecting `/`, `\`, `..`, and leading `.`; returns `Err(ScriptuiError::InvalidLocale(locale.to_string()))` otherwise).
+   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct SpellDiagnostic { pub line: usize, pub col_start: usize, pub col_end: usize, pub byte_start: usize, pub byte_end: usize, pub word: String }` (0-based line and char columns).
+   - `#[derive(Debug, Clone, Default)] pub struct PersonalDictionary { words: std::collections::BTreeSet<String> }` with `load_from_file(path)`, `save_to_file(path)` (atomic write-then-rename), `add(&mut self, word: &str)`, `contains(&self, word: &str) -> bool`, `len(&self) -> usize`, `is_empty(&self) -> bool`.
+   - `pub struct SpellEngine { locale: String, dict: spellbook::Dictionary, personal: PersonalDictionary, ignored: std::collections::HashSet<String> }` with:
+     - `pub fn default_en_us() -> ScriptuiResult<Self>` (loads `include_str!("../assets/dicts/en_US.aff")` and `include_str!("../assets/dicts/en_US.dic")` via `spellbook::Dictionary::new`, mapping errors to `ScriptuiError::SpellDict`).
+     - `pub fn load_locale(locale: &str, search_dirs: &[std::path::PathBuf]) -> ScriptuiResult<Self>` (validates locale via `validate_locale_name`, searches each dir for `<locale>.aff` and `<locale>.dic`, falls back to bundled `en_US` when `locale == "en_US"`, else returns `Err(ScriptuiError::SpellDict { .. })`).
+     - `pub fn locale(&self) -> &str`
+     - `pub fn personal_mut(&mut self) -> &mut PersonalDictionary`
+     - `pub fn ignore_word(&mut self, word: &str)`
+     - `pub fn is_correct(&self, word: &str) -> bool` (checks `ignored`, `personal`, and `self.dict.check(word)` plus lowercase check for capitalized words)
+     - `pub fn suggest(&self, word: &str, limit: usize) -> Vec<String>` (calls `self.dict.suggest(word, &mut out)` and truncates to `limit`)
+     - `pub fn check_document(&self, text: &str, skip_byte_ranges: &[std::ops::Range<usize>]) -> Vec<SpellDiagnostic>` (tokenizes alphabetic/apostrophe words across `text`, skips any word whose byte range overlaps `skip_byte_ranges`, skips single-char tokens and ALL-CAPS acronyms of length `>= 2`, emits `SpellDiagnostic` with exact 0-based `line`, `col_start`, `col_end`, `byte_start`, `byte_end`, and `word` for every misspelled word).
+   - `pub fn import_locale_files(locale: &str, dic_src: &std::path::Path, aff_src: &std::path::Path, dest_dir: &std::path::Path) -> ScriptuiResult<(std::path::PathBuf, std::path::PathBuf)>` (validates locale, parses both files with `spellbook::Dictionary::new` first so corrupt dictionaries are rejected before writing, creates `dest_dir`, writes `<locale>.dic` and `<locale>.aff`, returns their destination paths).
+5. Tests in `crates/scriptui-core/src/spell.rs` (`#[cfg(test)] mod tests`):
+   - `default_en_us_flags_misspelling_and_suggests`: loads `SpellEngine::default_en_us().unwrap()`, checks `"hello wrld"` with empty skip ranges; asserts 1 diagnostic with `word == "wrld"`, `line == 0`, `col_start == 6`, `col_end == 10`, and `engine.suggest("wrld", 5)` contains `"world"`.
+   - `spell_skips_code_ranges_and_respects_personal_and_ignore`: runs `check_document` on `"hello wrld `code_typo`"` with skip range covering `` `code_typo` ``; asserts only `"wrld"` is flagged; calls `ignore_word("wrld")` and asserts 0 diagnostics.
+   - `import_and_load_custom_locale_and_reject_traversal`: creates a minimal custom Hunspell `fr_FR.aff` + `fr_FR.dic` (`bonjour`) in `tempfile::tempdir()`, imports via `import_locale_files("fr_FR", ...)`, loads via `SpellEngine::load_locale("fr_FR", &[dest_dir])`, asserts `is_correct("bonjour") == true` and `is_correct("bonjoru") == false`; asserts `validate_locale_name("../etc")` returns `Err(ScriptuiError::InvalidLocale(_))`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub struct SpellEngine\b' crates/scriptui-core/src/spell.rs && grep -qE 'pub fn import_locale_files\b' crates/scriptui-core/src/spell.rs && grep -qE 'pub fn check_document\b' crates/scriptui-core/src/spell.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 2E: Theme Path-Traversal Hardening and End-to-End GFM + Spellcheck Pipeline Tests
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 2E: Reject path traversal in theme::resolve_theme and add end-to-end GFM markdown, highlighting, preview sync-scroll, and spellcheck integration tests.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/theme.rs
+  - crates/scriptui-core/tests/markdown_spell_pipeline.rs (NEW)
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/theme.rs:300-330 (resolve_theme)
+  - crates/scriptui-core/src/markdown.rs:1-90 (parse_gfm)
+  - crates/scriptui-core/src/highlight.rs:1-80 (highlight_editor_line)
+  - crates/scriptui-core/src/preview.rs:1-60 (build_preview)
+  - crates/scriptui-core/src/spell.rs:1-80 (SpellEngine)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn build_preview\b' crates/scriptui-core/src/preview.rs && grep -qE 'pub struct SpellEngine\b' crates/scriptui-core/src/spell.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/src/theme.rs — anchor `pub fn resolve_theme(name: &str, search_dirs: &[PathBuf]) -> ScriptuiResult<Theme> {` → add an upfront guard validating that `name` is non-empty and contains only ASCII alphanumeric characters, `_`, or `-` (rejecting `/`, `\`, `..`, or `.`); if invalid, return `Err(ScriptuiError::UnknownTheme(name.to_string()))` before probing `search_dirs`.
+2. crates/scriptui-core/src/theme.rs — add unit test `resolve_theme_rejects_path_traversal` asserting `resolve_theme("../secret", &[dir.path().to_path_buf()])` returns `Err(ScriptuiError::UnknownTheme(_))`.
+3. crates/scriptui-core/tests/markdown_spell_pipeline.rs (NEW) — add integration tests exercising the full Phase 2 pipeline together:
+   - `full_gfm_document_highlights_previews_and_spellchecks`: constructs a realistic GFM Markdown document containing YAML frontmatter (`---\ntitle: ScripTUI\n---`), `# Amber Editor`, a paragraph with an intentional typo (`"Check this documnt with https://example.com/wrld and \`inline_typo\`."`), a task list (`- [x] preview`), a `> [!NOTE]\n> block quote`, a GFM table, and a `rust` fenced code block containing `let wrld = 1;`.
+     - Parses with `parse_gfm`.
+     - Runs `SpellEngine::default_en_us()` with `&doc.spell_skip_byte_ranges`; asserts `"documnt"` IS flagged and `suggest("documnt", 5)` contains `"document"`, while `"inline_typo"`, `"https://example.com/wrld"`, and `"wrld"` inside the fenced code block are NOT flagged.
+     - Runs `highlight_editor_line` on the typo line with `LineOverlay { spell_error_cols: vec![...], ..Default::default() }` using `default_theme()` and asserts the misspelled segment has `fg == theme.palette.spell_error` and `flags.underline == true`.
+     - Runs `build_preview` with `default_theme()` and width `60`; asserts the preview contains box-drawing table borders, `"[NOTE]"`, `"[x]"`, and monotonically mapped scroll-sync lines.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn resolve_theme_rejects_path_traversal\b' crates/scriptui-core/src/theme.rs && grep -qE 'fn full_gfm_document_highlights_previews_and_spellchecks\b' crates/scriptui-core/tests/markdown_spell_pipeline.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
