@@ -24,6 +24,10 @@ pub enum ScriptuiError {
     UnknownTheme(String),
     #[error("char offset {offset} out of bounds for length {len}")]
     OutOfBounds { offset: usize, len: usize },
+    #[error("invalid locale identifier: {0}")]
+    InvalidLocale(String),
+    #[error("spell dictionary error for '{locale}': {reason}")]
+    SpellDict { locale: String, reason: String },
 }
 
 pub type ScriptuiResult<T> = std::result::Result<T, ScriptuiError>;
