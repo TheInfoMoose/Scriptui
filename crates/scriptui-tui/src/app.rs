@@ -25,10 +25,23 @@ use crate::modals::{
 use crate::mouse::{is_over_preview, MouseContext, MouseRouter};
 use crate::palette::{
     build_palette_entries, discover_installed_locales, handle_palette_key, render_command_palette,
+    PaletteEntry,
 };
 use crate::preview_pane::{render_preview_pane, PreviewPaneState};
 use crate::terminal::{crossterm_key_to_chord, write_osc52_clipboard, TerminalGuard};
 use crate::viewport::{render_editor_viewport, ViewportMetrics};
+
+fn is_blocking_modal(overlay: OverlayMode) -> bool {
+    matches!(
+        overlay,
+        OverlayMode::CommandPalette
+            | OverlayMode::SpellQuickFix
+            | OverlayMode::ConfirmQuit
+            | OverlayMode::ConfirmCloseBuffer
+            | OverlayMode::OpenFilePrompt
+            | OverlayMode::SaveAsPrompt
+    )
+}
 
 #[derive(Debug, Clone)]
 pub struct FrameState {
@@ -46,6 +59,7 @@ pub struct TuiApp {
     pub follow_cursor: bool,
     pub preview_pane: PreviewPaneState,
     pub find_bar: FindBarState,
+    pub palette_entries: Vec<PaletteEntry>,
 }
 
 impl TuiApp {
@@ -71,7 +85,14 @@ impl TuiApp {
             follow_cursor: true,
             preview_pane: PreviewPaneState::default(),
             find_bar: FindBarState::default(),
+            palette_entries: Vec::new(),
         })
+    }
+
+    pub fn refresh_palette_entries(&mut self) {
+        let dict_dirs = [AppConfig::default_config_dir().join("dicts")];
+        let locales = discover_installed_locales(&dict_dirs);
+        self.palette_entries = build_palette_entries(&locales);
     }
 
     pub fn render_frame(&mut self, frame: &mut Frame) {
@@ -122,10 +143,10 @@ impl TuiApp {
 
         match self.state.overlay {
             OverlayMode::CommandPalette => {
-                let dict_dirs = [AppConfig::default_config_dir().join("dicts")];
-                let locales = discover_installed_locales(&dict_dirs);
-                let entries = build_palette_entries(&locales);
-                render_command_palette(frame, total_area, &self.state, &entries);
+                if self.palette_entries.is_empty() {
+                    self.refresh_palette_entries();
+                }
+                render_command_palette(frame, total_area, &self.state, &self.palette_entries);
             }
             OverlayMode::SpellQuickFix => {
                 render_spell_quick_fix(frame, total_area, &self.state);
@@ -165,29 +186,32 @@ impl TuiApp {
                 }
             }
             OverlayMode::CommandPalette => {
+                if self.palette_entries.is_empty() {
+                    self.refresh_palette_entries();
+                }
                 let config_dir = AppConfig::default_config_dir();
                 let theme_dirs = [config_dir.join("themes")];
                 let dict_dirs = [config_dir.join("dicts")];
-                let locales = discover_installed_locales(&dict_dirs);
-                let entries = build_palette_entries(&locales);
-                if handle_palette_key(key, &mut self.state, &entries, &theme_dirs, &dict_dirs)? {
-                    return Ok(());
-                }
+                let _ = handle_palette_key(
+                    key,
+                    &mut self.state,
+                    &self.palette_entries,
+                    &theme_dirs,
+                    &dict_dirs,
+                )?;
+                return Ok(());
             }
             OverlayMode::SpellQuickFix => {
-                if handle_spell_quick_fix_key(key, &mut self.state)? {
-                    return Ok(());
-                }
+                let _ = handle_spell_quick_fix_key(key, &mut self.state)?;
+                return Ok(());
             }
             OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer => {
-                if handle_confirm_modal_key(key, &mut self.state) {
-                    return Ok(());
-                }
+                let _ = handle_confirm_modal_key(key, &mut self.state);
+                return Ok(());
             }
             OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt => {
-                if handle_file_prompt_key(key, &mut self.state)? {
-                    return Ok(());
-                }
+                let _ = handle_file_prompt_key(key, &mut self.state)?;
+                return Ok(());
             }
             OverlayMode::None => {}
         }
@@ -222,6 +246,10 @@ impl TuiApp {
                     self.preview_pane.sync_enabled = true;
                     self.state.dispatch(action)?;
                 }
+                Action::OpenCommandPalette => {
+                    self.refresh_palette_entries();
+                    self.state.dispatch(Action::OpenCommandPalette)?;
+                }
                 other => {
                     self.state.dispatch(other)?;
                 }
@@ -240,6 +268,10 @@ impl TuiApp {
     }
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) -> ScriptuiResult<bool> {
+        if is_blocking_modal(self.state.overlay) {
+            return Ok(false);
+        }
+
         let Some(frame) = self.last_frame.as_ref() else {
             return Ok(false);
         };
@@ -250,7 +282,10 @@ impl TuiApp {
         ) && is_over_preview(frame.regions, mouse.column, mouse.row)
         {
             self.preview_pane.sync_enabled = false;
-            let max_scroll = self.preview_pane.total_lines.saturating_sub(1);
+            let max_scroll = self
+                .preview_pane
+                .total_lines
+                .saturating_sub(self.preview_pane.viewport_height.max(1));
             self.preview_pane.scroll_line = match mouse.kind {
                 MouseEventKind::ScrollUp => self
                     .preview_pane
@@ -564,5 +599,116 @@ mod tests {
         )
         .expect("'y' should confirm quit");
         assert!(app.state.should_quit);
+    }
+
+    #[test]
+    fn blocking_modals_trap_unhandled_keys_and_ignore_mouse() {
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        app.state.insert_text("hello");
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render_frame should succeed");
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+Q should open ConfirmQuit");
+        assert_eq!(app.state.overlay, OverlayMode::ConfirmQuit);
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("'x' should be trapped");
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Backspace should be trapped");
+
+        let mouse_handled = app
+            .handle_mouse_event(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 10,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            })
+            .expect("mouse event should not error");
+        assert!(!mouse_handled);
+
+        assert_eq!(app.state.buffers.active().document.text(), "hello");
+        assert_eq!(app.state.overlay, OverlayMode::ConfirmQuit);
+    }
+
+    #[test]
+    fn alt_enter_resets_find_focus_and_palette_entries_cached() {
+        use crate::find_bar::FindFocus;
+
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        app.state.insert_text("foo bar foo");
+        assert!(app.palette_entries.is_empty());
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+H should open Replace");
+        assert_eq!(app.state.overlay, OverlayMode::Replace);
+
+        for ch in "foo".chars() {
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+                &mut clipboard_buf,
+            )
+            .expect("typing find query should succeed");
+        }
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Tab should switch focus to Replacement");
+        assert_eq!(app.find_bar.focus, FindFocus::Replacement);
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT),
+            &mut clipboard_buf,
+        )
+        .expect("Alt+Enter should select all occurrences");
+        assert_eq!(app.state.overlay, OverlayMode::None);
+        assert_eq!(app.find_bar.focus, FindFocus::Query);
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+P should open CommandPalette");
+        assert_eq!(app.state.overlay, OverlayMode::CommandPalette);
+        assert!(!app.palette_entries.is_empty());
+        let cached_len = app.palette_entries.len();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render_frame should succeed");
+        assert_eq!(app.palette_entries.len(), cached_len);
     }
 }

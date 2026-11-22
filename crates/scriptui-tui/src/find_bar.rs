@@ -133,6 +133,7 @@ pub fn handle_find_bar_key(
             if key.modifiers.contains(KeyModifiers::ALT) {
                 state.dispatch(Action::SelectAllOccurrences)?;
                 state.overlay = OverlayMode::None;
+                bar_state.focus = FindFocus::Query;
                 Ok(true)
             } else if key.modifiers.contains(KeyModifiers::CONTROL)
                 && state.overlay == OverlayMode::Replace

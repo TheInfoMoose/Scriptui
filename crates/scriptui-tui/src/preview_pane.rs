@@ -11,6 +11,7 @@ use crate::layout_tree::{rgb_to_color, segment_to_style};
 pub struct PreviewPaneState {
     pub scroll_line: usize,
     pub total_lines: usize,
+    pub viewport_height: usize,
     pub sync_enabled: bool,
 }
 
@@ -19,6 +20,7 @@ impl Default for PreviewPaneState {
         Self {
             scroll_line: 0,
             total_lines: 0,
+            viewport_height: 0,
             sync_enabled: true,
         }
     }
@@ -53,6 +55,7 @@ pub fn render_preview_pane(
 
     let preview_doc = state.build_active_preview(inner_width);
     pane_state.total_lines = preview_doc.lines.len();
+    pane_state.viewport_height = inner_height;
 
     if pane_state.sync_enabled {
         pane_state.scroll_line =
@@ -60,7 +63,7 @@ pub fn render_preview_pane(
     } else {
         pane_state.scroll_line = pane_state
             .scroll_line
-            .min(pane_state.total_lines.saturating_sub(1));
+            .min(pane_state.total_lines.saturating_sub(inner_height.max(1)));
     }
 
     let palette = &state.theme.palette;
