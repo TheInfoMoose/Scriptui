@@ -74,6 +74,16 @@ impl KeyChord {
     }
 
     pub fn normalized(self) -> Self {
+        if self.code == KeyCode::BackTab
+            && self.modifiers.shift
+            && !self.modifiers.ctrl
+            && !self.modifiers.alt
+        {
+            return Self {
+                code: KeyCode::BackTab,
+                modifiers: KeyModifiers::NONE,
+            };
+        }
         if let KeyCode::Char(c) = self.code {
             if self.modifiers.ctrl || self.modifiers.alt {
                 return Self {
@@ -465,5 +475,13 @@ mod tests {
 
         assert_eq!(keymap.unbind(custom), Some(Action::CloseBuffer));
         assert_eq!(keymap.lookup(custom), None);
+    }
+
+    #[test]
+    fn backtab_with_shift_normalizes_to_dedent() {
+        assert_eq!(
+            Keymap::default_cua().lookup(KeyChord::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Some(Action::Dedent)
+        );
     }
 }

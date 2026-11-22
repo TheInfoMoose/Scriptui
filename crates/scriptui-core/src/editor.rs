@@ -4,7 +4,7 @@ use crate::buffers::{BufferManager, CloseResult};
 use crate::config::AppConfig;
 use crate::error::{ScriptuiError, ScriptuiResult};
 use crate::history::EditTransaction;
-use crate::indent::{compute_enter_indent, dedent_lines, indent_lines, EnterOutcome};
+use crate::indent::{compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentStyle};
 use crate::keymap::{Action, Keymap};
 use crate::markdown::parse_gfm;
 use crate::preview::{build_preview, PreviewDocument};
@@ -45,6 +45,8 @@ pub enum OverlayMode {
     SpellQuickFix,
     ConfirmQuit,
     ConfirmCloseBuffer,
+    OpenFilePrompt,
+    SaveAsPrompt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,6 +223,7 @@ pub struct EditorState {
     pub palette: CommandPaletteState,
     pub spell_popup: Option<SpellQuickFixState>,
     pub spell_engine: Option<SpellEngine>,
+    pub file_prompt_input: String,
     pub status_message: Option<String>,
     pub should_quit: bool,
 }
@@ -248,6 +251,7 @@ impl EditorState {
             palette: CommandPaletteState::default(),
             spell_popup: None,
             spell_engine,
+            file_prompt_input: String::new(),
             status_message: None,
             should_quit: false,
         })
@@ -345,6 +349,128 @@ impl EditorState {
         Ok(())
     }
 
+    pub fn switch_spell_locale(
+        &mut self,
+        locale: &str,
+        search_dirs: &[PathBuf],
+    ) -> ScriptuiResult<()> {
+        let engine = SpellEngine::load_locale(locale, search_dirs)?;
+        self.spell_engine = Some(engine);
+        self.config.spell_locale = locale.to_string();
+        Ok(())
+    }
+
+    pub fn add_spell_popup_word_to_personal_dict(&mut self) -> bool {
+        let (Some(popup), Some(engine)) = (&self.spell_popup, &mut self.spell_engine) else {
+            return false;
+        };
+        engine.personal_mut().add(&popup.diagnostic.word);
+        self.spell_popup = None;
+        self.overlay = OverlayMode::None;
+        true
+    }
+
+    pub fn ignore_spell_popup_word(&mut self) -> bool {
+        let (Some(popup), Some(engine)) = (&self.spell_popup, &mut self.spell_engine) else {
+            return false;
+        };
+        engine.ignore_word(&popup.diagnostic.word);
+        self.spell_popup = None;
+        self.overlay = OverlayMode::None;
+        true
+    }
+
+    pub fn replace_active_match(&mut self) -> ScriptuiResult<bool> {
+        if self.find_replace.query.pattern.is_empty() {
+            return Ok(false);
+        }
+        let needs_refresh = match self.find_replace.active_match {
+            Some(idx) => idx >= self.find_replace.matches.len(),
+            None => true,
+        };
+        if needs_refresh {
+            self.update_find_matches()?;
+        }
+        let Some(idx) = self.find_replace.active_match else {
+            return Ok(false);
+        };
+        let Some(m) = self.find_replace.matches.get(idx).copied() else {
+            return Ok(false);
+        };
+
+        let replacement = self.find_replace.replacement.clone();
+        let active = self.buffers.active_mut();
+        let selection_before = active.document.selection().clone();
+        let edit = active
+            .document
+            .apply_raw_edit(m.start, m.end, &replacement)?;
+        let new_caret = m.start + replacement.chars().count();
+        active
+            .document
+            .set_selection(SelectionSet::point(new_caret));
+        let selection_after = active.document.selection().clone();
+        active.history.record(EditTransaction {
+            edits: vec![edit],
+            selection_before,
+            selection_after,
+        });
+
+        self.update_find_matches()?;
+        Ok(true)
+    }
+
+    pub fn replace_all_matches(&mut self) -> ScriptuiResult<usize> {
+        let query = self.find_replace.query.clone();
+        let replacement = self.find_replace.replacement.clone();
+        let count = {
+            let active = self.buffers.active_mut();
+            let selection_before = active.document.selection().clone();
+            let edits = crate::search::replace_all(&mut active.document, &query, &replacement)?;
+            let count = edits.len();
+            if !edits.is_empty() {
+                let selection_after = active.document.selection().clone();
+                active.history.record(EditTransaction {
+                    edits,
+                    selection_before,
+                    selection_after,
+                });
+            }
+            count
+        };
+        if count > 0 {
+            self.update_find_matches()?;
+        }
+        Ok(count)
+    }
+
+    pub fn toggle_indent_style(&mut self) {
+        self.config.indent.style = match self.config.indent.style {
+            IndentStyle::Spaces(4) => IndentStyle::Spaces(2),
+            IndentStyle::Spaces(2) => IndentStyle::Tabs,
+            _ => IndentStyle::Spaces(4),
+        };
+    }
+
+    pub fn confirm_dirty_action(&mut self, force: bool) {
+        if !force {
+            self.overlay = OverlayMode::None;
+            return;
+        }
+        match self.overlay {
+            OverlayMode::ConfirmQuit => {
+                self.should_quit = true;
+                self.overlay = OverlayMode::None;
+            }
+            OverlayMode::ConfirmCloseBuffer => {
+                let _ = self.buffers.close_active(true);
+                self.find_replace.matches.clear();
+                self.find_replace.active_match = None;
+                self.overlay = OverlayMode::None;
+            }
+            _ => {}
+        }
+    }
+
     pub fn build_active_preview(&self, width: usize) -> PreviewDocument {
         build_preview(&self.buffers.active().document.text(), &self.theme, width)
     }
@@ -400,18 +526,27 @@ impl EditorState {
                 }
             }
             Action::Save => {
-                if self.buffers.active().document.path().is_some() {
+                if self.buffers.active().document.path().is_none() {
+                    self.file_prompt_input.clear();
+                    self.overlay = OverlayMode::SaveAsPrompt;
+                } else {
                     self.buffers.active_mut().document.save_atomic()?;
                     self.status_message = Some("Saved".to_string());
-                } else {
-                    self.status_message = Some("No file path (use Save As)".to_string());
                 }
             }
             Action::SaveAs => {
-                self.status_message = Some("Save As dialog requested".to_string());
+                self.file_prompt_input = self
+                    .buffers
+                    .active()
+                    .document
+                    .path()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.overlay = OverlayMode::SaveAsPrompt;
             }
             Action::OpenFile => {
-                self.status_message = Some("Open File dialog requested".to_string());
+                self.file_prompt_input.clear();
+                self.overlay = OverlayMode::OpenFilePrompt;
             }
             Action::Undo => {
                 let active = self.buffers.active_mut();
@@ -643,7 +778,13 @@ impl EditorState {
                 .iter()
                 .filter(|edit| edit.start <= offset)
                 .map(|edit| {
-                    edit.inserted.chars().count() as isize - (edit.end - edit.start) as isize
+                    let inserted_len = edit.inserted.chars().count() as isize;
+                    let deleted_len = (edit.end - edit.start) as isize;
+                    if offset < edit.end {
+                        inserted_len - (offset - edit.start) as isize
+                    } else {
+                        inserted_len - deleted_len
+                    }
                 })
                 .sum();
             (offset as isize + delta).clamp(0, max_len) as usize
@@ -896,5 +1037,134 @@ mod tests {
 
         editor.dispatch(Action::SelectAll).unwrap();
         assert_eq!(editor.selected_text(), "    one\n    two\nthree");
+    }
+
+    #[test]
+    fn dedent_inside_leading_whitespace_clamps_caret_to_line_start() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("one\n    two");
+
+        let offset = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 1, col: 2 });
+        assert_eq!(offset, 6);
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(offset));
+
+        editor.dispatch(Action::Dedent).unwrap();
+
+        assert_eq!(editor.buffers.active().document.text(), "one\ntwo");
+        let new_offset = editor.buffers.active().document.selection().primary().head;
+        assert_eq!(new_offset, 4);
+        assert_eq!(
+            editor
+                .buffers
+                .active()
+                .document
+                .char_to_position(new_offset),
+            Position { line: 1, col: 0 }
+        );
+    }
+
+    #[test]
+    fn replace_active_and_all_and_spell_dict_helpers() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("foo bar foo baz foo");
+        editor.find_replace.query = SearchQuery::plain("foo");
+        editor.find_replace.replacement = "qux".to_string();
+
+        assert!(editor.replace_active_match().unwrap());
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "qux bar foo baz foo"
+        );
+        assert_eq!(
+            editor.buffers.active().document.selection().primary().head,
+            3
+        );
+
+        let replaced = editor.replace_all_matches().unwrap();
+        assert_eq!(replaced, 2);
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "qux bar qux baz qux"
+        );
+
+        // Undo reverts replace_all_matches as a single transaction.
+        editor.dispatch(Action::Undo).unwrap();
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "qux bar foo baz foo"
+        );
+
+        // Spell personal dict and ignore helpers.
+        editor.dispatch(Action::NewBuffer).unwrap();
+        editor.insert_text("hello wrld zzxxqq");
+        let pos_wrld = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 7 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(pos_wrld));
+        assert!(editor.open_spell_quick_fix_at_cursor());
+        assert!(editor.add_spell_popup_word_to_personal_dict());
+        assert_eq!(editor.overlay, OverlayMode::None);
+        assert!(editor.spell_popup.is_none());
+        assert!(!editor.open_spell_quick_fix_at_cursor());
+
+        let pos_zz = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 12 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(pos_zz));
+        assert!(editor.open_spell_quick_fix_at_cursor());
+        assert!(editor.ignore_spell_popup_word());
+        assert_eq!(editor.overlay, OverlayMode::None);
+        assert!(editor.spell_popup.is_none());
+        assert!(!editor.open_spell_quick_fix_at_cursor());
+
+        // Indent style cycling: Spaces(4) -> Spaces(2) -> Tabs -> Spaces(4).
+        assert_eq!(editor.config.indent.style, IndentStyle::Spaces(4));
+        editor.toggle_indent_style();
+        assert_eq!(editor.config.indent.style, IndentStyle::Spaces(2));
+        editor.toggle_indent_style();
+        assert_eq!(editor.config.indent.style, IndentStyle::Tabs);
+        editor.toggle_indent_style();
+        assert_eq!(editor.config.indent.style, IndentStyle::Spaces(4));
+
+        // Confirm dirty actions (cancel, close buffer, quit).
+        let buf_count = editor.buffers.len();
+        editor.dispatch(Action::CloseBuffer).unwrap();
+        assert_eq!(editor.overlay, OverlayMode::ConfirmCloseBuffer);
+        editor.confirm_dirty_action(false);
+        assert_eq!(editor.overlay, OverlayMode::None);
+        assert_eq!(editor.buffers.len(), buf_count);
+
+        editor.dispatch(Action::CloseBuffer).unwrap();
+        assert_eq!(editor.overlay, OverlayMode::ConfirmCloseBuffer);
+        editor.confirm_dirty_action(true);
+        assert_eq!(editor.overlay, OverlayMode::None);
+        assert_eq!(editor.buffers.len(), buf_count - 1);
+
+        editor.dispatch(Action::Quit).unwrap();
+        assert_eq!(editor.overlay, OverlayMode::ConfirmQuit);
+        assert!(!editor.should_quit);
+        editor.confirm_dirty_action(true);
+        assert_eq!(editor.overlay, OverlayMode::None);
+        assert!(editor.should_quit);
     }
 }
