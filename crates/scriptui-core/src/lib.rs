@@ -5,6 +5,7 @@ pub mod highlight;
 pub mod history;
 pub mod indent;
 pub mod markdown;
+pub mod preview;
 pub mod search;
 pub mod selection;
 pub mod theme;
@@ -21,6 +22,7 @@ pub use indent::{
     compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentConfig, IndentStyle,
 };
 pub use markdown::{parse_gfm, CodeBlockRegion, GfmDocument, MdSpan, MdTokenKind};
+pub use preview::{build_preview, PreviewDocument, PreviewLine};
 pub use search::{
     find_all, next_match, prev_match, replace_all, select_all_occurrences, SearchMatch, SearchQuery,
 };
