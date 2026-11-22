@@ -7,18 +7,26 @@ use crossterm::event::{
     MouseEventKind,
 };
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
-use scriptui_core::{Action, AppConfig, EditorState, ScriptuiError, ScriptuiResult, WrappedLayout};
+use scriptui_core::{
+    Action, AppConfig, EditorState, OverlayMode, ScriptuiError, ScriptuiResult, WrappedLayout,
+};
 
 use crate::chrome::{
     render_preview_edge_tab, render_split_divider, render_status_bar, render_tab_bar, TabHitbox,
 };
 use crate::cli::Cli;
-use crate::layout_tree::{compute_screen_regions, rgb_to_color, ScreenRegions};
-use crate::mouse::{MouseContext, MouseRouter};
+use crate::find_bar::{handle_find_bar_key, render_find_bar, FindBarState};
+use crate::layout_tree::{compute_screen_regions, ScreenRegions};
+use crate::modals::{
+    handle_confirm_modal_key, handle_file_prompt_key, handle_spell_quick_fix_key,
+    render_confirm_modal, render_file_prompt, render_spell_quick_fix,
+};
+use crate::mouse::{is_over_preview, MouseContext, MouseRouter};
+use crate::palette::{
+    build_palette_entries, discover_installed_locales, handle_palette_key, render_command_palette,
+};
+use crate::preview_pane::{render_preview_pane, PreviewPaneState};
 use crate::terminal::{crossterm_key_to_chord, write_osc52_clipboard, TerminalGuard};
 use crate::viewport::{render_editor_viewport, ViewportMetrics};
 
@@ -36,6 +44,8 @@ pub struct TuiApp {
     pub mouse: MouseRouter,
     pub last_frame: Option<FrameState>,
     pub follow_cursor: bool,
+    pub preview_pane: PreviewPaneState,
+    pub find_bar: FindBarState,
 }
 
 impl TuiApp {
@@ -59,6 +69,8 @@ impl TuiApp {
             mouse: MouseRouter::default(),
             last_frame: None,
             follow_cursor: true,
+            preview_pane: PreviewPaneState::default(),
+            find_bar: FindBarState::default(),
         })
     }
 
@@ -84,31 +96,48 @@ impl TuiApp {
             render_split_divider(frame, div_rect, &self.state.theme);
         }
 
+        let editor_top_source_line = if let Some(wl) = wrapped_layout.as_ref() {
+            wl.visual_lines
+                .get(self.state.buffers.active().scroll_line)
+                .map_or(0, |vl| vl.logical_line)
+        } else {
+            self.state.buffers.active().scroll_line
+        };
+
         if let Some(preview_rect) = regions.preview {
-            let inner_width = preview_rect.width.saturating_sub(2).max(1) as usize;
-            let preview_doc = self.state.build_active_preview(inner_width);
-            let lines: Vec<Line<'static>> = preview_doc
-                .plain_lines()
-                .into_iter()
-                .map(Line::from)
-                .collect();
-            let palette = &self.state.theme.palette;
-            let preview_style = Style::default()
-                .fg(rgb_to_color(palette.foreground))
-                .bg(rgb_to_color(palette.background));
-            let border_style = Style::default()
-                .fg(rgb_to_color(palette.border_default))
-                .bg(rgb_to_color(palette.background));
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Preview ")
-                .border_style(border_style)
-                .style(preview_style);
-            let widget = Paragraph::new(lines).block(block).style(preview_style);
-            frame.render_widget(widget, preview_rect);
+            render_preview_pane(
+                frame,
+                preview_rect,
+                &self.state,
+                &mut self.preview_pane,
+                editor_top_source_line,
+            );
+        }
+
+        if let Some(find_rect) = regions.find_bar {
+            render_find_bar(frame, find_rect, &self.state, self.find_bar);
         }
 
         render_status_bar(frame, regions.status_bar, &self.state);
+
+        match self.state.overlay {
+            OverlayMode::CommandPalette => {
+                let dict_dirs = [AppConfig::default_config_dir().join("dicts")];
+                let locales = discover_installed_locales(&dict_dirs);
+                let entries = build_palette_entries(&locales);
+                render_command_palette(frame, total_area, &self.state, &entries);
+            }
+            OverlayMode::SpellQuickFix => {
+                render_spell_quick_fix(frame, total_area, &self.state);
+            }
+            OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer => {
+                render_confirm_modal(frame, total_area, &self.state);
+            }
+            OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt => {
+                render_file_prompt(frame, total_area, &self.state);
+            }
+            OverlayMode::None | OverlayMode::Find | OverlayMode::Replace => {}
+        }
 
         self.last_frame = Some(FrameState {
             regions,
@@ -128,6 +157,40 @@ impl TuiApp {
             return Ok(());
         }
         self.follow_cursor = true;
+
+        match self.state.overlay {
+            OverlayMode::Find | OverlayMode::Replace => {
+                if handle_find_bar_key(key, &mut self.state, &mut self.find_bar)? {
+                    return Ok(());
+                }
+            }
+            OverlayMode::CommandPalette => {
+                let config_dir = AppConfig::default_config_dir();
+                let theme_dirs = [config_dir.join("themes")];
+                let dict_dirs = [config_dir.join("dicts")];
+                let locales = discover_installed_locales(&dict_dirs);
+                let entries = build_palette_entries(&locales);
+                if handle_palette_key(key, &mut self.state, &entries, &theme_dirs, &dict_dirs)? {
+                    return Ok(());
+                }
+            }
+            OverlayMode::SpellQuickFix => {
+                if handle_spell_quick_fix_key(key, &mut self.state)? {
+                    return Ok(());
+                }
+            }
+            OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer => {
+                if handle_confirm_modal_key(key, &mut self.state) {
+                    return Ok(());
+                }
+            }
+            OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt => {
+                if handle_file_prompt_key(key, &mut self.state)? {
+                    return Ok(());
+                }
+            }
+            OverlayMode::None => {}
+        }
 
         if let Some(action) = crossterm_key_to_chord(key).and_then(|c| self.state.keymap.lookup(c))
         {
@@ -155,6 +218,10 @@ impl TuiApp {
                     }
                     self.state.dispatch(Action::Cut)?;
                 }
+                Action::TogglePreview | Action::ExpandPreview => {
+                    self.preview_pane.sync_enabled = true;
+                    self.state.dispatch(action)?;
+                }
                 other => {
                     self.state.dispatch(other)?;
                 }
@@ -173,6 +240,33 @@ impl TuiApp {
     }
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) -> ScriptuiResult<bool> {
+        let Some(frame) = self.last_frame.as_ref() else {
+            return Ok(false);
+        };
+
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) && is_over_preview(frame.regions, mouse.column, mouse.row)
+        {
+            self.preview_pane.sync_enabled = false;
+            let max_scroll = self.preview_pane.total_lines.saturating_sub(1);
+            self.preview_pane.scroll_line = match mouse.kind {
+                MouseEventKind::ScrollUp => self
+                    .preview_pane
+                    .scroll_line
+                    .saturating_sub(3)
+                    .min(max_scroll),
+                MouseEventKind::ScrollDown => self
+                    .preview_pane
+                    .scroll_line
+                    .saturating_add(3)
+                    .min(max_scroll),
+                _ => self.preview_pane.scroll_line,
+            };
+            return Ok(true);
+        }
+
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 self.follow_cursor = false;
@@ -182,10 +276,6 @@ impl TuiApp {
             }
             _ => {}
         }
-
-        let Some(frame) = self.last_frame.as_ref() else {
-            return Ok(false);
-        };
 
         let ctx = MouseContext {
             regions: frame.regions,
@@ -356,5 +446,123 @@ mod tests {
             .draw(|frame| app.render_frame(frame))
             .expect("third render_frame should succeed");
         assert_eq!(app.state.buffers.active().scroll_line, 0);
+    }
+
+    fn render_to_string(terminal: &mut Terminal<TestBackend>, app: &mut TuiApp) -> String {
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render_frame should succeed");
+        let buffer = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                rendered.push_str(buffer[(x, y)].symbol());
+            }
+            rendered.push('\n');
+        }
+        rendered
+    }
+
+    #[test]
+    fn tui_app_overlays_and_styled_preview_integration() {
+        let cli = Cli {
+            command: None,
+            theme: Some("crt_amber".to_string()),
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        app.state
+            .insert_text("# Heading\n\n- [x] Done\n\nfoo bar foo");
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut clipboard_buf = Vec::new();
+
+        // 1. Open split preview (Ctrl+Shift+P), render, assert styled preview title and heading
+        app.handle_key_event(
+            KeyEvent::new(
+                KeyCode::Char('P'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+Shift+P should toggle preview");
+        let rendered = render_to_string(&mut terminal, &mut app);
+        assert!(
+            rendered.contains("Preview [SYNC]"),
+            "expected rendered buffer to contain 'Preview [SYNC]', got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Heading"),
+            "expected rendered buffer to contain 'Heading', got:\n{rendered}"
+        );
+
+        // 2. Open Command Palette (Ctrl+P), type "ice_cyan", Enter -> theme switches
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+P should open command palette");
+        assert_eq!(app.state.overlay, OverlayMode::CommandPalette);
+        for ch in "ice_cyan".chars() {
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+                &mut clipboard_buf,
+            )
+            .expect("typing palette query should succeed");
+        }
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Enter in command palette should succeed");
+        assert_eq!(app.state.theme.name, "ice_cyan");
+
+        // 3. Open Find bar (Ctrl+F), type "foo", render, assert "1/2", Alt+Enter -> 2 selections
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+F should open find bar");
+        assert_eq!(app.state.overlay, OverlayMode::Find);
+        for ch in "foo".chars() {
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+                &mut clipboard_buf,
+            )
+            .expect("typing find query should succeed");
+        }
+        let rendered = render_to_string(&mut terminal, &mut app);
+        assert!(
+            rendered.contains("1/2"),
+            "expected find bar to show '1/2', got:\n{rendered}"
+        );
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT),
+            &mut clipboard_buf,
+        )
+        .expect("Alt+Enter should select all occurrences");
+        assert_eq!(app.state.buffers.active().document.selection().len(), 2);
+        assert_eq!(app.state.overlay, OverlayMode::None);
+
+        // 4. Ctrl+Q on dirty buffer -> ConfirmQuit modal -> 'y' sets should_quit
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+Q should prompt on dirty buffer");
+        assert_eq!(app.state.overlay, OverlayMode::ConfirmQuit);
+        let rendered = render_to_string(&mut terminal, &mut app);
+        assert!(
+            rendered.contains("Quit?"),
+            "expected confirm modal to render, got:\n{rendered}"
+        );
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("'y' should confirm quit");
+        assert!(app.state.should_quit);
     }
 }

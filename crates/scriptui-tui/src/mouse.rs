@@ -152,6 +152,9 @@ impl MouseRouter {
                 Ok(false)
             }
             MouseEventKind::ScrollUp => {
+                if is_over_preview(ctx.regions, event.column, event.row) {
+                    return Ok(false);
+                }
                 let max_visual_line = max_visual_line_index(state, ctx.wrapped_layout);
                 let active = state.buffers.active_mut();
                 active.scroll_line = active
@@ -161,6 +164,9 @@ impl MouseRouter {
                 Ok(true)
             }
             MouseEventKind::ScrollDown => {
+                if is_over_preview(ctx.regions, event.column, event.row) {
+                    return Ok(false);
+                }
                 let max_visual_line = max_visual_line_index(state, ctx.wrapped_layout);
                 let active = state.buffers.active_mut();
                 active.scroll_line = active
@@ -172,6 +178,10 @@ impl MouseRouter {
             _ => Ok(false),
         }
     }
+}
+
+pub fn is_over_preview(regions: ScreenRegions, col: u16, row: u16) -> bool {
+    regions.preview.is_some_and(|r| rect_contains(r, col, row))
 }
 
 fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
