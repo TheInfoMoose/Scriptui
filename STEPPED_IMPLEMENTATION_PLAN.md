@@ -18,13 +18,17 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 7 — Complete):** Resolved both Phase 6 review findings (`BUG-0010` and `BUG-0011`). All planned phases (Phases 1–7) and tracked items are closed.
+**Phase goal (Phase 8):** Prepare and verify the `v0.1.0` release: add MIT `LICENSE`, complete Cargo workspace release metadata and `[profile.release]` tuning with verified release binary `--version` output (`STEP 8A`), author `CHANGELOG.md` and update `README.md` with installation/release/license sections (`STEP 8B`), and add GitHub Actions CI and tag-triggered release workflows (`STEP 8C`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
 ### Up Next
 
-_None — Phase 7 complete. Awaiting Phase 8 scope or release cut._
+| # | Step | Command | Scope | Target Files | Waits on |
+| :---: | :--- | :---: | :--- | :--- | :--- |
+| 1 | **STEP 8A** | `/goal` | release | `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `LICENSE` | — |
+| 2 | **STEP 8B** | `/goal` | docs | `CHANGELOG.md`, `README.md` | STEP 8A |
+| 3 | **STEP 8C** | `/goal` | ci | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | STEP 8B |
 
 ### Completed
 
@@ -73,7 +77,7 @@ _None — Phase 7 complete. Awaiting Phase 8 scope or release cut._
 
 ### Future phases
 
-_None — all planned phases (Phases 1–7) are complete._
+- **Post-Phase 8 (`[USER]` release cut):** After Phase 8 review passes, push `master` to `origin`, create annotated tag `git tag -a v0.1.0 -m "ScripTUI v0.1.0"`, and push `v0.1.0` to trigger `.github/workflows/release.yml`.
 
 ### Open Questions
 
@@ -83,3 +87,167 @@ _None._
 
 Tracked in neb: `neb list --status pending`. Reviewed at phase end; only picked items become steps.
 _None — all tracked tasks and bugs are closed._
+
+---
+
+## Phase 8 Step Blocks
+
+### STEP 8A: Release Metadata, MIT `LICENSE` & Release Profile Tuning
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8A: Add root MIT LICENSE, complete Cargo workspace package metadata and [profile.release] tuning (preserving unwinding panic for TerminalGuard), and verify release binary --version output.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - Cargo.toml
+  - crates/scriptui-core/Cargo.toml
+  - crates/scriptui-tui/Cargo.toml
+  - LICENSE
+READ_ONLY_REFS:
+  - Cargo.toml:1-9 (workspace.package)
+  - crates/scriptui-core/Cargo.toml:1-20
+  - crates/scriptui-tui/Cargo.toml:1-19
+  - crates/scriptui-tui/src/cli.rs:6-11 (clap version attribute)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do NOT set `panic = "abort"` in `[profile.release]` (TerminalGuard::drop relies on unwinding to restore raw terminal mode on panic).
+  - Do NOT modify any Rust source files or Cargo.lock dependencies.
+
+[PRE_GATE]
+grep -qE '^version = "0\.1\.0"' Cargo.toml && grep -qE '^license = "MIT"' Cargo.toml
+
+[MUTATION_SPEC]
+1. LICENSE:
+   - Create root `LICENSE` containing the standard MIT License text with `Copyright (c) 2026 ScripTUI Contributors`.
+2. Cargo.toml:
+   - Under `[workspace.package]`, add:
+     - `repository = "https://github.com/TheInfoMoose/Scriptui"`
+     - `readme = "README.md"`
+     - `keywords = ["tui", "editor", "markdown", "ratatui", "terminal"]`
+     - `categories = ["command-line-utilities", "text-editors"]`
+   - Append `[profile.release]` with:
+     - `lto = "thin"`
+     - `codegen-units = 1`
+     - `strip = "symbols"`
+3. crates/scriptui-core/Cargo.toml and crates/scriptui-tui/Cargo.toml:
+   - Under `[package]`, add:
+     - `repository.workspace = true`
+     - `readme.workspace = true`
+     - `keywords.workspace = true`
+     - `categories.workspace = true`
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo build --release && ./target/release/scriptui --version | grep -qE '^scriptui 0\.1\.0$' && test -f LICENSE
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8B: `CHANGELOG.md` (v0.1.0) & `README.md` Installation / License Sections
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8B: Add Keep-a-Changelog CHANGELOG.md for v0.1.0 and update README.md with Cargo installation instructions, changelog link, and MIT license section.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - CHANGELOG.md
+  - README.md
+READ_ONLY_REFS:
+  - README.md:14-43 (Quick Start / Build & Run)
+  - README.md:185-193 (Development & Verification)
+  - LICENSE:1-21
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not remove or weaken any existing README.md tables or keybinding documentation.
+
+[PRE_GATE]
+test -f LICENSE && grep -qE '^## Development & Verification' README.md
+
+[MUTATION_SPEC]
+1. CHANGELOG.md:
+   - Create `CHANGELOG.md` following Keep a Changelog 1.1.0 and Semantic Versioning 2.0.0.
+   - Include `## [0.1.0] - 2026-11-22` with concise `### Added` bullets covering:
+     - Headless `scriptui-core` engine: Ropey `DocumentBuffer` with monotonic `doc_id`, multi-buffer `BufferManager`, transactional undo/redo, multi-cursor `SelectionSet`, auto-indent/dedent, literal & regex find/replace, and Unicode display-width + tab-stop soft wrapping.
+     - GitHub Flavored Markdown & spellcheck pipeline: `comrak` GFM parsing, `syntect` fenced code block highlighting, live styled Markdown preview, cached per-revision analysis, and embedded `en_US` Hunspell spellcheck with custom locale import (`scriptui dict import`).
+     - Ratatui + Crossterm TUI (`scriptui-tui`): CLI (`clap`), `TerminalGuard` with bracketed paste and OSC 52 clipboard sync, 5 built-in retro-futuristic palettes + custom TOML themes, tab bar, line-number gutter, display-cell aligned viewport & mouse routing, split/full Markdown preview pane, inline find/replace bar, command palette, and spellcheck/file/unsaved-changes modals.
+     - Packaging & release metadata: MIT `LICENSE`, workspace release profile, and multi-palette `TestBackend` integration test suite.
+2. README.md:
+   - Under `## Quick Start`, add a `### Install` subsection (before or after `### Build & Run`) showing `cargo install --path crates/scriptui-tui` and verifying with `scriptui --version`.
+   - At the end of `README.md` (after `## Development & Verification`), add `## Changelog & License` linking to `[CHANGELOG.md](CHANGELOG.md)` and noting the MIT license in `[LICENSE](LICENSE)`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE '^## \[0\.1\.0\]' CHANGELOG.md && grep -qE 'cargo install --path crates/scriptui-tui' README.md && grep -qE '\[LICENSE\]\(LICENSE\)' README.md
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 8C: GitHub Actions CI & Tag-Triggered Release Workflows
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 8C: Add GitHub Actions CI workflow (fmt, clippy, test, release build) and tag-triggered release workflow (v* tags building Linux/macOS tarballs with SHA256 checksums).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/ci.yml
+  - .github/workflows/release.yml
+READ_ONLY_REFS:
+  - Cargo.toml:1-25
+  - crates/scriptui-tui/Cargo.toml:1-25
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not hardcode any secrets, tokens, or personal paths (use `${{ secrets.GITHUB_TOKEN }}` / default `GITHUB_TOKEN` permissions only).
+
+[PRE_GATE]
+test -f LICENSE && test -f CHANGELOG.md
+
+[MUTATION_SPEC]
+1. .github/workflows/ci.yml:
+   - Name: `CI`
+   - Triggers: `push` on branches `["master"]`, `pull_request` on branches `["master"]`.
+   - Permissions: `contents: read`.
+   - Job `check` on `ubuntu-latest`:
+     - `actions/checkout@v4`
+     - `dtolnay/rust-toolchain@stable` with `components: rustfmt, clippy`
+     - `Swatinem/rust-cache@v2`
+     - Run `cargo fmt --all -- --check`
+     - Run `cargo clippy --workspace --all-targets -- -D warnings`
+     - Run `cargo test --workspace`
+     - Run `cargo build --release`
+2. .github/workflows/release.yml:
+   - Name: `Release`
+   - Triggers: `push` on tags `["v*"]`.
+   - Permissions: `contents: write`.
+   - Job `build` with `strategy.matrix.include`:
+     - `{ os: ubuntu-latest, target: x86_64-unknown-linux-gnu }`
+     - `{ os: macos-14, target: aarch64-apple-darwin }`
+   - Steps in `build`:
+     - `actions/checkout@v4`
+     - `dtolnay/rust-toolchain@stable` with `targets: ${{ matrix.target }}`
+     - `Swatinem/rust-cache@v2`
+     - Build: `cargo build --release --locked --target ${{ matrix.target }} -p scriptui-tui`
+     - Package tarball `scriptui-${{ github.ref_name }}-${{ matrix.target }}.tar.gz` containing `target/${{ matrix.target }}/release/scriptui`, `README.md`, `LICENSE`, and `CHANGELOG.md`, plus a `.sha256` checksum file (using `sha256sum` on Linux / `shasum -a 256` on macOS).
+     - Upload artifacts with `actions/upload-artifact@v4`.
+   - Job `publish` (`needs: build`, `runs-on: ubuntu-latest`):
+     - `actions/download-artifact@v4` with `merge-multiple: true` into `dist/`.
+     - `softprops/action-gh-release@v2` with `files: dist/*` and `generate_release_notes: true`.
+
+[POST_GATE]
+python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml")); yaml.safe_load(open(".github/workflows/release.yml"))' && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
