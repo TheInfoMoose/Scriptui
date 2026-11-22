@@ -1,6 +1,7 @@
 pub mod app;
 pub mod chrome;
 pub mod cli;
+pub mod find_bar;
 pub mod layout_tree;
 pub mod mouse;
 pub mod preview_pane;
@@ -12,6 +13,7 @@ pub use chrome::{
     render_preview_edge_tab, render_split_divider, render_status_bar, render_tab_bar, TabHitbox,
 };
 pub use cli::{execute_dict_import, Cli, Command, DictCommand};
+pub use find_bar::{handle_find_bar_key, render_find_bar, FindBarState, FindFocus};
 pub use layout_tree::{compute_screen_regions, rgb_to_color, segment_to_style, ScreenRegions};
 pub use mouse::{MouseContext, MouseRouter};
 pub use preview_pane::{compute_synced_preview_scroll, render_preview_pane, PreviewPaneState};
