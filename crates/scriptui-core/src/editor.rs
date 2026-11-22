@@ -349,21 +349,48 @@ impl EditorState {
         build_preview(&self.buffers.active().document.text(), &self.theme, width)
     }
 
+    pub fn selected_text(&self) -> String {
+        let doc = &self.buffers.active().document;
+        let text = doc.text();
+        doc.selection()
+            .ranges()
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                text.chars()
+                    .skip(s.start())
+                    .take(s.end() - s.start())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub fn dispatch(&mut self, action: Action) -> ScriptuiResult<()> {
         match action {
             Action::NewBuffer => {
                 self.buffers.new_buffer();
+                self.find_replace.matches.clear();
+                self.find_replace.active_match = None;
             }
-            Action::CloseBuffer => {
-                if self.buffers.close_active(false) == CloseResult::NeedsConfirmation {
+            Action::CloseBuffer => match self.buffers.close_active(false) {
+                CloseResult::Closed => {
+                    self.find_replace.matches.clear();
+                    self.find_replace.active_match = None;
+                }
+                CloseResult::NeedsConfirmation => {
                     self.overlay = OverlayMode::ConfirmCloseBuffer;
                 }
-            }
+            },
             Action::NextBuffer => {
                 self.buffers.next_buffer();
+                self.find_replace.matches.clear();
+                self.find_replace.active_match = None;
             }
             Action::PrevBuffer => {
                 self.buffers.prev_buffer();
+                self.find_replace.matches.clear();
+                self.find_replace.active_match = None;
             }
             Action::Quit => {
                 if self.buffers.has_dirty_buffers() {
@@ -453,6 +480,30 @@ impl EditorState {
             Action::Dedent => {
                 self.handle_indent(false)?;
             }
+            Action::SelectAll => {
+                let doc = &mut self.buffers.active_mut().document;
+                let len_chars = doc.len_chars();
+                let sel = if len_chars == 0 {
+                    SelectionSet::point(0)
+                } else {
+                    SelectionSet::from_ranges(vec![Selection::new(0, len_chars)])
+                };
+                doc.set_selection(sel);
+            }
+            Action::Cut => {
+                let has_selection = self
+                    .buffers
+                    .active()
+                    .document
+                    .selection()
+                    .ranges()
+                    .iter()
+                    .any(|sel| !sel.is_empty());
+                if has_selection {
+                    self.handle_delete(true);
+                }
+            }
+            Action::Copy | Action::Paste => {}
             Action::MoveLeft => self.move_primary_selection(CursorMove::Left, false),
             Action::MoveRight => self.move_primary_selection(CursorMove::Right, false),
             Action::MoveUp => self.move_primary_selection(CursorMove::Up, false),
@@ -482,7 +533,11 @@ impl EditorState {
     }
 
     fn jump_to_match(&mut self, forward: bool) -> ScriptuiResult<()> {
-        if self.find_replace.matches.is_empty() && !self.find_replace.query.pattern.is_empty() {
+        if self.find_replace.query.pattern.is_empty() {
+            self.find_replace.matches.clear();
+            self.find_replace.active_match = None;
+            return Ok(());
+        } else {
             self.update_find_matches()?;
         }
 
@@ -567,14 +622,40 @@ impl EditorState {
         let active = self.buffers.active_mut();
         let selection_before = active.document.selection().clone();
         let primary = selection_before.primary();
-        let start_line = active.document.char_to_position(primary.start()).line;
-        let end_line = active.document.char_to_position(primary.end()).line;
+        let start_pos = active.document.char_to_position(primary.start());
+        let end_pos = active.document.char_to_position(primary.end());
+        let start_line = start_pos.line;
+        let end_line = if !primary.is_empty() && end_pos.col == 0 && end_pos.line > start_line {
+            end_pos.line - 1
+        } else {
+            end_pos.line
+        };
 
         let edits = if indent {
             indent_lines(&mut active.document, start_line, end_line, indent_cfg)?
         } else {
             dedent_lines(&mut active.document, start_line, end_line, indent_cfg)?
         };
+
+        let max_len = active.document.len_chars() as isize;
+        let shift_offset = |offset: usize| -> usize {
+            let delta: isize = edits
+                .iter()
+                .filter(|edit| edit.start <= offset)
+                .map(|edit| {
+                    edit.inserted.chars().count() as isize - (edit.end - edit.start) as isize
+                })
+                .sum();
+            (offset as isize + delta).clamp(0, max_len) as usize
+        };
+        let new_anchor = shift_offset(primary.anchor);
+        let new_head = shift_offset(primary.head);
+        active
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![Selection::new(
+                new_anchor, new_head,
+            )]));
+
         let selection_after = active.document.selection().clone();
         active.history.record(EditTransaction {
             edits,
@@ -737,5 +818,83 @@ mod tests {
             editor.buffers.active().document.text(),
             format!("hello {suggestion}")
         );
+    }
+
+    #[test]
+    fn find_next_refreshes_stale_matches_after_edit_and_buffer_switch() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("alpha beta");
+        editor.find_replace.query = SearchQuery::plain("alpha");
+        assert_eq!(editor.update_find_matches().unwrap(), 1);
+
+        // Prepend text so the original match offset (0..5) becomes stale.
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(0));
+        editor.insert_text("prefix ");
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(0));
+
+        editor.dispatch(Action::FindNext).unwrap();
+        assert_eq!(editor.selected_text(), "alpha");
+        let sel = editor.buffers.active().document.selection().primary();
+        assert_eq!((sel.start(), sel.end()), (7, 12));
+
+        // Switch to a second buffer containing "alpha" at a different offset.
+        editor.dispatch(Action::NewBuffer).unwrap();
+        assert!(editor.find_replace.matches.is_empty());
+        assert_eq!(editor.find_replace.active_match, None);
+
+        editor.insert_text("zz alpha");
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(0));
+
+        editor.dispatch(Action::FindNext).unwrap();
+        assert_eq!(editor.selected_text(), "alpha");
+        let sel2 = editor.buffers.active().document.selection().primary();
+        assert_eq!((sel2.start(), sel2.end()), (3, 8));
+    }
+
+    #[test]
+    fn indent_shifts_selection_and_excludes_trailing_col_zero_line() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("one\ntwo\nthree");
+
+        let start = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 1 });
+        let end = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 2, col: 0 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![Selection::new(start, end)]));
+
+        editor.dispatch(Action::Indent).unwrap();
+
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "    one\n    two\nthree"
+        );
+        let primary = editor.buffers.active().document.selection().primary();
+        assert_eq!(primary.anchor, start + 4);
+        assert_eq!(primary.head, end + 8);
+
+        editor.dispatch(Action::SelectAll).unwrap();
+        assert_eq!(editor.selected_text(), "    one\n    two\nthree");
     }
 }

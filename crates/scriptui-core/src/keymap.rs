@@ -135,6 +135,10 @@ pub enum Action {
     Delete,
     Indent,
     Dedent,
+    Copy,
+    Cut,
+    Paste,
+    SelectAll,
     Escape,
 }
 
@@ -329,6 +333,22 @@ impl Keymap {
         map.bind(
             KeyChord::new(KeyCode::Tab, KeyModifiers::SHIFT),
             Action::Dedent,
+        );
+        map.bind(
+            KeyChord::new(KeyCode::Char('c'), KeyModifiers::CTRL),
+            Action::Copy,
+        );
+        map.bind(
+            KeyChord::new(KeyCode::Char('x'), KeyModifiers::CTRL),
+            Action::Cut,
+        );
+        map.bind(
+            KeyChord::new(KeyCode::Char('v'), KeyModifiers::CTRL),
+            Action::Paste,
+        );
+        map.bind(
+            KeyChord::new(KeyCode::Char('a'), KeyModifiers::CTRL),
+            Action::SelectAll,
         );
         map.bind(
             KeyChord::new(KeyCode::Escape, KeyModifiers::NONE),
