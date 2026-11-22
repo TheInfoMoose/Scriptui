@@ -1,5 +1,6 @@
 use crate::buffer::DocumentBuffer;
 use crate::selection::Position;
+use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisualLine {
@@ -78,6 +79,23 @@ pub fn compute_indent_guides(line: &str, tab_width: usize) -> Vec<usize> {
     (0..levels).map(|level| level * step).collect()
 }
 
+pub fn char_display_width(ch: char, col_cells: usize, tab_width: usize) -> usize {
+    if ch == '\t' {
+        let step = tab_width.max(1);
+        step - (col_cells % step)
+    } else {
+        UnicodeWidthChar::width(ch).unwrap_or(0)
+    }
+}
+
+pub fn line_display_width(line: &str, tab_width: usize) -> usize {
+    let mut col = 0usize;
+    for ch in line.chars() {
+        col += char_display_width(ch, col, tab_width);
+    }
+    col
+}
+
 pub fn compute_wrapped_layout(
     buf: &DocumentBuffer,
     viewport_width: usize,
@@ -92,7 +110,7 @@ pub fn compute_wrapped_layout(
         let chars: Vec<char> = line.chars().collect();
         let guides = compute_indent_guides(&line, tab_width);
 
-        if !soft_wrap || chars.len() <= width {
+        if !soft_wrap || line_display_width(&line, tab_width) <= width {
             visual_lines.push(VisualLine {
                 logical_line: line_idx,
                 wrap_index: 0,
@@ -106,12 +124,25 @@ pub fn compute_wrapped_layout(
         let mut start = 0usize;
         let mut wrap_index = 0usize;
         while start < chars.len() {
-            let max_end = (start + width).min(chars.len());
+            let mut idx = start;
+            let mut cell_width = 0usize;
+            while idx < chars.len() {
+                let ch_width = char_display_width(chars[idx], cell_width, tab_width);
+                if cell_width + ch_width > width {
+                    if idx == start {
+                        idx += 1;
+                    }
+                    break;
+                }
+                cell_width += ch_width;
+                idx += 1;
+            }
+            let max_end = idx;
             let end = if max_end == chars.len() {
                 max_end
             } else if let Some(ws) = (start..max_end)
                 .rev()
-                .find(|&idx| chars[idx] == ' ' || chars[idx] == '\t')
+                .find(|&i| chars[i] == ' ' || chars[i] == '\t')
             {
                 ws + 1
             } else {
@@ -213,5 +244,59 @@ mod tests {
             let (vr, vc) = layout.logical_to_visual(pos);
             assert_eq!(layout.visual_to_logical(vr, vc), pos);
         }
+    }
+
+    #[test]
+    fn soft_wrap_accounts_for_cjk_wide_chars_and_tab_stops() {
+        let cjk_buf = DocumentBuffer::from_str_content("日本語テスト");
+        assert_eq!(line_display_width("日本語テスト", 4), 12);
+        let cjk_layout = compute_wrapped_layout(&cjk_buf, 6, true, 4);
+        assert_eq!(cjk_layout.len_visual_lines(), 2);
+        assert_eq!(
+            (
+                cjk_layout.visual_lines[0].char_start,
+                cjk_layout.visual_lines[0].char_end
+            ),
+            (0, 3)
+        );
+        assert_eq!(
+            (
+                cjk_layout.visual_lines[1].char_start,
+                cjk_layout.visual_lines[1].char_end
+            ),
+            (3, 6)
+        );
+
+        let tab_text = "\tabcdef";
+        assert_eq!(line_display_width(tab_text, 4), 10);
+        let tab_buf = DocumentBuffer::from_str_content(tab_text);
+        let tab_layout = compute_wrapped_layout(&tab_buf, 8, true, 4);
+        assert!(tab_layout.len_visual_lines() >= 2);
+        assert!(
+            (
+                tab_layout.visual_lines[0].char_start,
+                tab_layout.visual_lines[0].char_end
+            ) == (0, 1)
+                || (
+                    tab_layout.visual_lines[0].char_start,
+                    tab_layout.visual_lines[0].char_end
+                ) == (0, 5)
+        );
+        let tab_chars: Vec<char> = tab_text.chars().collect();
+        for vl in &tab_layout.visual_lines {
+            let segment: String = tab_chars[vl.char_start..vl.char_end].iter().collect();
+            assert!(line_display_width(&segment, 4) <= 8);
+        }
+
+        let narrow_buf = DocumentBuffer::from_str_content("日");
+        let narrow_layout = compute_wrapped_layout(&narrow_buf, 1, true, 4);
+        assert_eq!(narrow_layout.len_visual_lines(), 1);
+        assert_eq!(
+            (
+                narrow_layout.visual_lines[0].char_start,
+                narrow_layout.visual_lines[0].char_end
+            ),
+            (0, 1)
+        );
     }
 }
