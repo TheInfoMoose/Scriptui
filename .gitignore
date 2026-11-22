@@ -1,0 +1,5 @@
+/target/
+.git/phased/
+*.swp
+*~
+.DS_Store

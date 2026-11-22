@@ -1,0 +1,19 @@
+[phase]
+id = "post_production"
+title = "Post-Production"
+status = "planned"
+start_date = "2026-11-22"
+
+[[scopes.manifest]]
+id = "inbox"
+type = "inbox"
+path = "domains/inbox"
+
+[[scopes.manifest]]
+id = "scripts"
+type = "build_scripts"
+path = "domains/scripts"
+
+[summary]
+total_items = 0
+completed_items = 0

@@ -1,0 +1,51 @@
+[scope]
+id = "inbox"
+target = ".tracker"
+tech_stack = []
+description = "Default unscoped triage inbox"
+
+[items]
+bugs = []
+features = []
+
+[[items.tasks]]
+id = "TASK-0001"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
+
+[[items.tasks]]
+id = "TASK-0002"
+title = "buffer"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
+
+[[items.tasks]]
+id = "TASK-0003"
+title = "history"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
+
+[[items.tasks]]
+id = "TASK-0004"
+title = "indent"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
+
+[[items.tasks]]
+id = "TASK-0005"
+title = "search"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
+
+[[items.tasks]]
+id = "TASK-0006"
+title = "theme"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T00:11:26Z"
