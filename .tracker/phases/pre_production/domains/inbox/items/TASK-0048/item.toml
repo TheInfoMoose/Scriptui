@@ -1,0 +1,19 @@
+schema_version = 2
+
+[item]
+id = "TASK-0048"
+type = "task"
+title = "Version test hardcodes scriptui 0.1.0 instead of reading CARGO_PKG_VERSION"
+status = "pending"
+severity = "low"
+scope_ref = "inbox"
+created_at = "2026-11-22T23:02:50Z"
+updated_at = "2026-11-22T23:02:50Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

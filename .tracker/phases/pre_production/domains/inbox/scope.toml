@@ -412,3 +412,17 @@ title = "docs"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T21:57:53Z"
+
+[[items.tasks]]
+id = "TASK-0048"
+title = "Version test hardcodes scriptui 0.1.0 instead of reading CARGO_PKG_VERSION"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T23:02:50Z"
+
+[[items.tasks]]
+id = "TASK-0049"
+title = "CHANGELOG version headings lack Keep a Changelog link definitions"
+status = "pending"
+severity = "low"
+created_at = "2026-11-22T23:02:51Z"

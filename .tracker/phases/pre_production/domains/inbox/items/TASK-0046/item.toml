@@ -8,7 +8,7 @@ status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T21:57:53Z"
-updated_at = "2026-11-22T22:01:01Z"
+updated_at = "2026-11-22T23:03:47Z"
 source_ref = "STEP 8D"
 
 [effort]
@@ -23,3 +23,8 @@ recurrence_count = 0
 date = "2026-11-22"
 commit = "706671e"
 summary = "STEP 8D: MIT License, Release Metadata and Release Profile (phased check PASS)"
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "706671e"
+summary = "STEP 8D: MIT LICENSE, inherited release metadata and tuned release profile; reviewed in Phase 8 review"

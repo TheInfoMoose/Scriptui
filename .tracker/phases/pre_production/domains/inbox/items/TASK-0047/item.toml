@@ -8,7 +8,7 @@ status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T21:57:53Z"
-updated_at = "2026-11-22T22:02:54Z"
+updated_at = "2026-11-22T23:03:47Z"
 source_ref = "STEP 8E"
 
 [effort]
@@ -23,3 +23,8 @@ recurrence_count = 0
 date = "2026-11-22"
 commit = "4b7b777"
 summary = "STEP 8E: CHANGELOG and README Installation, Releases and License (phased check PASS)"
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "4b7b777"
+summary = "STEP 8E: CHANGELOG 0.1.0 entry and README Installation, Releases and License sections; reviewed in Phase 8 review"
