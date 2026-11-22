@@ -1,7 +1,8 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use scriptui_core::{
-    Action, EditorState, PreviewMode, ScriptuiResult, Selection, SelectionSet, WrappedLayout,
+    Action, EditorState, IndentStyle, PreviewMode, ScriptuiResult, Selection, SelectionSet,
+    WrappedLayout,
 };
 
 use crate::chrome::TabHitbox;
@@ -205,7 +206,12 @@ fn resolve_char_offset(
     let visual_col = active
         .scroll_col
         .saturating_add(col.saturating_sub(text_area.x) as usize);
-    let pos = wrapped_layout.visual_to_logical(visual_row, visual_col);
+    let tab_width = match state.config.indent.style {
+        IndentStyle::Spaces(w) => w.max(1) as usize,
+        IndentStyle::Tabs => 4,
+    };
+    let pos =
+        wrapped_layout.visual_cells_to_logical(&active.document, visual_row, visual_col, tab_width);
     active.document.position_to_char(pos)
 }
 
@@ -224,15 +230,18 @@ fn max_visual_line_index(state: &EditorState, wrapped_layout: Option<&WrappedLay
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
+    use ratatui::Terminal;
     use scriptui_core::{
-        compute_wrapped_layout, AppConfig, EditorState, OverlayMode, PreviewMode, Selection,
+        compute_wrapped_layout, AppConfig, DocumentBuffer, EditorState, IndentStyle, OverlayMode,
+        Position, PreviewMode, Selection,
     };
 
     use super::{MouseContext, MouseRouter};
     use crate::chrome::TabHitbox;
     use crate::layout_tree::compute_screen_regions;
-    use crate::viewport::ViewportMetrics;
+    use crate::viewport::{render_editor_viewport, ViewportMetrics};
 
     fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         MouseEvent {
@@ -457,5 +466,97 @@ mod tests {
         assert!(handled);
         assert_eq!(state.preview_mode, PreviewMode::Split(40));
         assert_eq!(state.config.preview_split_percent, 40);
+    }
+
+    #[test]
+    fn mouse_click_maps_display_cells_for_tabs_and_cjk_wide_chars() {
+        let mut config = AppConfig::default();
+        config.indent.style = IndentStyle::Tabs;
+        let mut state = EditorState::new(config).expect("editor state should initialize");
+        state.buffers.active_mut().document = DocumentBuffer::from_str_content("\tabc\n日本語X");
+
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        let total_area = Rect::new(0, 0, 40, 6);
+        let regions = compute_screen_regions(total_area, state.preview_mode, state.overlay);
+        let mut rendered_viewport = None;
+        let mut rendered_layout = None;
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let (metrics, layout) = render_editor_viewport(frame, area, &mut state, true);
+                rendered_viewport = Some(metrics);
+                rendered_layout = Some(layout);
+            })
+            .expect("draw viewport");
+
+        let viewport = rendered_viewport.expect("viewport metrics should be rendered");
+        let layout = rendered_layout.expect("wrapped layout should be rendered");
+        let text_area = viewport.text_area;
+        let hitboxes = Vec::new();
+        let mut router = MouseRouter::default();
+        let ctx = MouseContext {
+            regions,
+            tab_hitboxes: &hitboxes,
+            viewport: Some(viewport),
+            wrapped_layout: Some(&layout),
+            total_area,
+        };
+
+        // Visual cell 4 on row 0 -> char offset 1 ('a')
+        let handled = router
+            .handle_mouse(
+                mouse_event(
+                    MouseEventKind::Down(MouseButton::Left),
+                    text_area.x + 4,
+                    text_area.y,
+                ),
+                &mut state,
+                &ctx,
+            )
+            .expect("click on 'a' should succeed");
+        assert!(handled);
+        assert_eq!(
+            state.buffers.active().document.selection().primary(),
+            Selection::point(1)
+        );
+
+        // Visual cell 2 on row 0 -> char offset 0 ('\t')
+        let handled = router
+            .handle_mouse(
+                mouse_event(
+                    MouseEventKind::Down(MouseButton::Left),
+                    text_area.x + 2,
+                    text_area.y,
+                ),
+                &mut state,
+                &ctx,
+            )
+            .expect("click inside tab should succeed");
+        assert!(handled);
+        assert_eq!(
+            state.buffers.active().document.selection().primary(),
+            Selection::point(0)
+        );
+
+        // Visual cell 6 on row 1 -> 'X' (line 1, col 3)
+        let handled = router
+            .handle_mouse(
+                mouse_event(
+                    MouseEventKind::Down(MouseButton::Left),
+                    text_area.x + 6,
+                    text_area.y + 1,
+                ),
+                &mut state,
+                &ctx,
+            )
+            .expect("click on 'X' should succeed");
+        assert!(handled);
+        let head = state.buffers.active().document.selection().primary().head;
+        assert_eq!(
+            state.buffers.active().document.char_to_position(head),
+            Position { line: 1, col: 3 }
+        );
     }
 }

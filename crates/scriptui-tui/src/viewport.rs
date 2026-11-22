@@ -4,8 +4,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::Frame;
 use scriptui_core::{
-    compute_wrapped_layout, highlight_editor_line, DocumentBuffer, EditorState, IndentStyle,
-    LineOverlay, WrappedLayout,
+    char_display_width, compute_wrapped_layout, highlight_editor_line, DocumentBuffer, EditorState,
+    IndentStyle, LineOverlay, WrappedLayout,
 };
 
 use crate::layout_tree::{rgb_to_color, segment_to_style};
@@ -136,7 +136,8 @@ pub fn render_editor_viewport(
             .document
             .char_to_position(active.document.selection().primary().head)
     };
-    let cursor_visual = layout.logical_to_visual(primary_pos);
+    let cursor_visual =
+        layout.logical_to_visual_cells(&state.buffers.active().document, primary_pos, tab_width);
 
     {
         let active = state.buffers.active_mut();
@@ -288,26 +289,65 @@ pub fn render_editor_viewport(
         let slice_end = vl.char_end.min(styled_chars.len());
         let visual_slice = &styled_chars[slice_start..slice_end];
 
-        for col_offset in 0..visible_width {
-            let visual_col = h_scroll.saturating_add(col_offset);
-            let Some(&(ch, style)) = visual_slice.get(visual_col) else {
-                break;
-            };
-            let logical_col = vl.char_start.saturating_add(visual_col);
-            let x = text_area.x.saturating_add(col_offset as u16);
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                if ch == ' ' && vl.indent_guides.contains(&logical_col) {
-                    cell.set_symbol("│");
-                    cell.set_style(
-                        Style::default()
-                            .fg(muted_fg)
-                            .bg(style.bg.unwrap_or(bg_color)),
-                    );
-                } else {
-                    let mut sym = [0u8; 4];
-                    cell.set_symbol(ch.encode_utf8(&mut sym));
-                    cell.set_style(style);
+        let mut display_col = 0usize;
+        for &(ch, style) in visual_slice {
+            let w = char_display_width(ch, display_col, tab_width);
+            if w == 0 {
+                continue;
+            }
+            if ch == '\t' {
+                for step in 0..w {
+                    let cell_col = display_col + step;
+                    if cell_col >= h_scroll && cell_col < h_scroll.saturating_add(visible_width) {
+                        let x = text_area.x.saturating_add((cell_col - h_scroll) as u16);
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            if step == 0
+                                && vl.wrap_index == 0
+                                && vl.indent_guides.contains(&cell_col)
+                            {
+                                cell.set_symbol("│");
+                                cell.set_style(
+                                    Style::default()
+                                        .fg(muted_fg)
+                                        .bg(style.bg.unwrap_or(bg_color)),
+                                );
+                            } else {
+                                cell.set_symbol(" ");
+                                cell.set_style(style);
+                            }
+                        }
+                    }
                 }
+            } else if display_col >= h_scroll
+                && display_col.saturating_add(w) <= h_scroll.saturating_add(visible_width)
+            {
+                let x = text_area.x.saturating_add((display_col - h_scroll) as u16);
+                if ch == ' ' && vl.wrap_index == 0 && vl.indent_guides.contains(&display_col) {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_symbol("│");
+                        cell.set_style(
+                            Style::default()
+                                .fg(muted_fg)
+                                .bg(style.bg.unwrap_or(bg_color)),
+                        );
+                    }
+                } else {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        let mut sym = [0u8; 4];
+                        cell.set_symbol(ch.encode_utf8(&mut sym));
+                        cell.set_style(style);
+                    }
+                    for cont in 1..w {
+                        if let Some(cell) = buf.cell_mut((x.saturating_add(cont as u16), y)) {
+                            cell.set_symbol("");
+                            cell.set_style(style);
+                        }
+                    }
+                }
+            }
+            display_col += w;
+            if display_col >= h_scroll.saturating_add(visible_width) {
+                break;
             }
         }
     }
@@ -318,7 +358,8 @@ pub fn render_editor_viewport(
 
     for sel in active.document.selection().ranges() {
         let head_pos = active.document.char_to_position(sel.head);
-        let (vis_row, vis_col) = layout.logical_to_visual(head_pos);
+        let (vis_row, vis_col) =
+            layout.logical_to_visual_cells(&active.document, head_pos, tab_width);
         if vis_row < scroll_line || vis_row >= scroll_line.saturating_add(visible_rows) {
             continue;
         }
@@ -339,7 +380,9 @@ pub fn render_editor_viewport(
 mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use scriptui_core::{select_all_occurrences, AppConfig, DocumentBuffer, SearchQuery};
+    use scriptui_core::{
+        select_all_occurrences, AppConfig, DocumentBuffer, Position, SearchQuery, SelectionSet,
+    };
 
     use super::*;
 
@@ -457,5 +500,73 @@ mod tests {
             .expect("draw viewport");
 
         assert_eq!(state.buffers.active().scroll_line, 10);
+    }
+
+    #[test]
+    fn viewport_expands_tabs_and_aligns_cjk_wide_chars_and_cursor() {
+        let mut config = AppConfig::default();
+        config.indent.style = IndentStyle::Tabs;
+        let mut state = EditorState::new(config).expect("default editor state");
+        {
+            let active = state.buffers.active_mut();
+            active.document = DocumentBuffer::from_str_content("\tabc\n日本語X");
+            let a_offset = active
+                .document
+                .position_to_char(Position { line: 0, col: 1 });
+            active.document.set_selection(SelectionSet::point(a_offset));
+        }
+
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        let mut metrics = ViewportMetrics {
+            area: Rect::default(),
+            gutter_width: 0,
+            text_area: Rect::default(),
+        };
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let (m, _) = render_editor_viewport(frame, area, &mut state, true);
+                metrics = m;
+            })
+            .expect("draw viewport with cursor on 'a'");
+
+        let cursor_bg = rgb_to_color(state.theme.palette.cursor_bg);
+        let buf = terminal.backend().buffer();
+        let tx = metrics.text_area.x;
+        let ty = metrics.text_area.y;
+
+        assert_eq!(buf[(tx, ty)].symbol(), "│");
+        assert_eq!(buf[(tx + 1, ty)].symbol(), " ");
+        assert_eq!(buf[(tx + 2, ty)].symbol(), " ");
+        assert_eq!(buf[(tx + 3, ty)].symbol(), " ");
+        assert_eq!(buf[(tx + 4, ty)].symbol(), "a");
+        assert_eq!(buf[(tx + 4, ty)].bg, cursor_bg);
+
+        {
+            let active = state.buffers.active_mut();
+            let x_offset = active
+                .document
+                .position_to_char(Position { line: 1, col: 3 });
+            active.document.set_selection(SelectionSet::point(x_offset));
+        }
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let (m, _) = render_editor_viewport(frame, area, &mut state, true);
+                metrics = m;
+            })
+            .expect("draw viewport with cursor on 'X'");
+
+        let buf = terminal.backend().buffer();
+        let tx = metrics.text_area.x;
+        let row1 = metrics.text_area.y + 1;
+        assert_eq!(buf[(tx, row1)].symbol(), "日");
+        assert_eq!(buf[(tx + 2, row1)].symbol(), "本");
+        assert_eq!(buf[(tx + 4, row1)].symbol(), "語");
+        assert_eq!(buf[(tx + 6, row1)].symbol(), "X");
+        assert_eq!(buf[(tx + 6, row1)].bg, cursor_bg);
     }
 }
