@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0005"
 type = "task"
 title = "search"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T00:11:26Z"
-updated_at = "2026-11-22T00:11:26Z"
+updated_at = "2026-11-22T00:23:56Z"
 source_ref = "STEP 1E"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0005@2026-11-22T00:21:39Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "24ccfa5"
+summary = "STEP 1E: Search, Replace All, and Select-All Multi-Cursor Engine (phased check PASS)"
