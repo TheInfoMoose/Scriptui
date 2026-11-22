@@ -2,7 +2,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -32,6 +35,7 @@ pub struct TuiApp {
     pub state: EditorState,
     pub mouse: MouseRouter,
     pub last_frame: Option<FrameState>,
+    pub follow_cursor: bool,
 }
 
 impl TuiApp {
@@ -54,6 +58,7 @@ impl TuiApp {
             state,
             mouse: MouseRouter::default(),
             last_frame: None,
+            follow_cursor: true,
         })
     }
 
@@ -64,7 +69,8 @@ impl TuiApp {
         let tab_hitboxes = render_tab_bar(frame, regions.tab_bar, &self.state);
 
         let (viewport, wrapped_layout) = if let Some(editor_rect) = regions.editor {
-            let (metrics, layout) = render_editor_viewport(frame, editor_rect, &mut self.state);
+            let (metrics, layout) =
+                render_editor_viewport(frame, editor_rect, &mut self.state, self.follow_cursor);
             (Some(metrics), Some(layout))
         } else {
             (None, None)
@@ -121,6 +127,7 @@ impl TuiApp {
         if key.kind != KeyEventKind::Press {
             return Ok(());
         }
+        self.follow_cursor = true;
 
         if let Some(action) = crossterm_key_to_chord(key).and_then(|c| self.state.keymap.lookup(c))
         {
@@ -166,6 +173,16 @@ impl TuiApp {
     }
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) -> ScriptuiResult<bool> {
+        match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                self.follow_cursor = false;
+            }
+            MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
+                self.follow_cursor = true;
+            }
+            _ => {}
+        }
+
         let Some(frame) = self.last_frame.as_ref() else {
             return Ok(false);
         };
@@ -182,8 +199,12 @@ impl TuiApp {
     }
 
     pub fn run_event_loop(&mut self, guard: &mut TerminalGuard) -> io::Result<()> {
+        let mut needs_redraw = true;
         while !self.state.should_quit {
-            guard.terminal_mut().draw(|f| self.render_frame(f))?;
+            if needs_redraw {
+                guard.terminal_mut().draw(|f| self.render_frame(f))?;
+                needs_redraw = false;
+            }
 
             if event::poll(Duration::from_millis(50))? {
                 match event::read()? {
@@ -192,11 +213,16 @@ impl TuiApp {
                         if let Err(err) = self.handle_key_event(key, &mut stdout) {
                             self.state.status_message = Some(err.to_string());
                         }
+                        needs_redraw = true;
                     }
                     Event::Mouse(mouse) => {
                         if let Err(err) = self.handle_mouse_event(mouse) {
                             self.state.status_message = Some(err.to_string());
                         }
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => {
+                        needs_redraw = true;
                     }
                     _ => {}
                 }
@@ -279,5 +305,56 @@ mod tests {
             rendered.contains("crt_amber"),
             "expected rendered buffer to contain 'crt_amber', got:\n{rendered}"
         );
+    }
+
+    #[test]
+    fn mouse_wheel_scroll_not_snapped_back_on_next_render() {
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        let content = (1..=20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.state.buffers.active_mut().document =
+            scriptui_core::DocumentBuffer::from_str_content(&content);
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("initial render_frame should succeed");
+
+        app.handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 10,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("ScrollDown should succeed");
+        assert!(!app.follow_cursor);
+        assert_eq!(app.state.buffers.active().scroll_line, 3);
+
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("second render_frame should succeed");
+        assert_eq!(app.state.buffers.active().scroll_line, 3);
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Right key should succeed");
+        assert!(app.follow_cursor);
+
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("third render_frame should succeed");
+        assert_eq!(app.state.buffers.active().scroll_line, 0);
     }
 }

@@ -97,6 +97,7 @@ pub fn render_editor_viewport(
     frame: &mut Frame,
     area: Rect,
     state: &mut EditorState,
+    follow_cursor: bool,
 ) -> (ViewportMetrics, WrappedLayout) {
     let total_lines = state.buffers.active().document.len_lines();
     let gutter_width = compute_gutter_width(total_lines, state.config.line_numbers)
@@ -139,14 +140,23 @@ pub fn render_editor_viewport(
 
     {
         let active = state.buffers.active_mut();
-        ensure_cursor_visible(
-            &mut active.scroll_line,
-            &mut active.scroll_col,
-            cursor_visual,
-            (text_area.height as usize, text_area.width as usize),
-            layout.len_visual_lines(),
-            soft_wrap,
-        );
+        if follow_cursor {
+            ensure_cursor_visible(
+                &mut active.scroll_line,
+                &mut active.scroll_col,
+                cursor_visual,
+                (text_area.height as usize, text_area.width as usize),
+                layout.len_visual_lines(),
+                soft_wrap,
+            );
+        } else {
+            active.scroll_line = active
+                .scroll_line
+                .min(layout.len_visual_lines().saturating_sub(1));
+            if soft_wrap {
+                active.scroll_col = 0;
+            }
+        }
     }
 
     if area.width == 0 || area.height == 0 {
@@ -353,7 +363,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                let (m, _) = render_editor_viewport(frame, area, &mut state);
+                let (m, _) = render_editor_viewport(frame, area, &mut state, true);
                 metrics = m;
             })
             .expect("draw viewport");
@@ -402,7 +412,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                let (m, _) = render_editor_viewport(frame, area, &mut state);
+                let (m, _) = render_editor_viewport(frame, area, &mut state, true);
                 metrics = m;
             })
             .expect("draw viewport");
@@ -425,5 +435,30 @@ mod tests {
                 sel.head
             );
         }
+    }
+
+    #[test]
+    fn viewport_preserves_manual_scroll_when_follow_cursor_is_false() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        let content = (1..=20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        {
+            let active = state.buffers.active_mut();
+            active.document = DocumentBuffer::from_str_content(&content);
+            active.scroll_line = 10;
+        }
+
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let _ = render_editor_viewport(frame, area, &mut state, false);
+            })
+            .expect("draw viewport");
+
+        assert_eq!(state.buffers.active().scroll_line, 10);
     }
 }
