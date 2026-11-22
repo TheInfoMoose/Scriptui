@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod buffers;
 pub mod config;
 pub mod error;
 pub mod highlight;
@@ -13,6 +14,7 @@ pub mod spell;
 pub mod theme;
 
 pub use buffer::{BufferEdit, DocumentBuffer};
+pub use buffers::{BufferId, BufferManager, CloseResult, ManagedBuffer};
 pub use config::AppConfig;
 pub use error::{ScriptuiError, ScriptuiResult};
 pub use highlight::{
