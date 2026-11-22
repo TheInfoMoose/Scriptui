@@ -367,6 +367,6 @@ created_at = "2026-11-22T14:35:08Z"
 [[items.tasks]]
 id = "TASK-0041"
 title = "tui"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T14:35:08Z"
