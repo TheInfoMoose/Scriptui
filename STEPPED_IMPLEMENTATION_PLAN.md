@@ -18,46 +18,21 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 5):** Fix Phase 4 review findings (dedent-in-whitespace `BUG-0002`, `BackTab+SHIFT` normalization, mouse-wheel scroll snap-back, and idle 20 Hz redraw storm), then build the styled GFM preview pane with synchronized scrolling, inline Find/Replace bar with `Alt+Enter` multi-cursor handoff, fuzzy Command Palette (live palette/locale/indent switching), Spellcheck quick-fix popup, Open/Save-As & Dirty-Exit modals, and full `TuiApp` overlay/mouse integration.
+**Phase goal (Phase 6):** Resolve all Phase 5 review findings (`BUG-0004`–`BUG-0009`: modal key/mouse trapping, `replace_active_match` advancement, Find focus reset, cached Command Palette entries, unsynced preview scroll clamp), implement Unicode display width & tab-stop layout (`BUG-0003`), add revision-keyed GFM/spellcheck analysis caching, wire bracketed paste (`EnableBracketedPaste` + `Event::Paste`), verify all 5 palettes & end-to-end workflows with Ratatui `TestBackend` integration tests and a large-file responsiveness check, and publish `README.md`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
-
-### Phase 5 Top-Down UI Container Tree
-
-```text
-Root (Vertical)
-├── [Length(1)]         TabBar          (open buffers, active highlight, dirty '*' marker)
-├── [Min(1)]            MainSplit       (Horizontal, driven by PreviewMode)
-│   ├── PreviewMode::Collapsed
-│   │   ├── [Min(1)]    EditorPane      (gutter + soft-wrapped GFM text + indent guides + cursors)
-│   │   └── [Length(3)] PreviewEdgeTab  (vertical '◀ PREVIEW' toggle handle)
-│   ├── PreviewMode::Split(pct)
-│   │   ├── [Percentage(100 - pct)] EditorPane
-│   │   ├── [Length(1)]             SplitDivider (draggable vertical separator)
-│   │   └── [Percentage(pct)]       PreviewPane  (styled GFM: tables, checkboxes, callouts, code, sync-scroll)
-│   └── PreviewMode::Expanded
-│       └── [Percentage(100)]       PreviewPane
-├── [Length(0 | 1 | 2)] FindReplaceBar  (row 0: Find + match count + [Aa][W][.*]; row 1: Replace)
-└── [Length(1)]         StatusBar       (telemetry: file/dirty, Ln/Col, cursors, wrap, indent, locale, theme)
-
-Floating Modals (rendered over Root with Clear + centered_rect when OverlayMode != None/Find/Replace):
-├── OverlayMode::CommandPalette         (max 60% width × 14 rows: query input + fuzzy filtered actions/themes/locales)
-├── OverlayMode::SpellQuickFix          (max 46 cols × suggestions+4 rows: ranked suggestions + Add + Ignore)
-├── OverlayMode::OpenFilePrompt / SaveAsPrompt (max 64 cols × 3 rows: single-line path input)
-└── OverlayMode::ConfirmQuit / ConfirmCloseBuffer (max 56 cols × 5 rows: [Y] Discard / [N] Cancel)
-```
 
 ### Up Next
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 5A** | `/goal` | core | `crates/scriptui-core/src/keymap.rs`, `crates/scriptui-core/src/editor.rs` | — |
-| 2 | **STEP 5B** | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs`, `crates/scriptui-tui/src/app.rs` | STEP 5A |
-| 3 | **STEP 5C** | `/goal` | tui | `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/lib.rs` | STEP 5B |
-| 4 | **STEP 5D** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/lib.rs` | STEP 5C |
-| 5 | **STEP 5E** | `/goal` | tui | `crates/scriptui-tui/src/palette.rs`, `crates/scriptui-tui/src/lib.rs` | STEP 5D |
-| 6 | **STEP 5F** | `/goal` | tui | `crates/scriptui-tui/src/modals.rs`, `crates/scriptui-tui/src/lib.rs` | STEP 5E |
-| 7 | **STEP 5G** | `/goal` | tui | `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/mouse.rs` | STEP 5F |
+| 1 | **STEP 6A** | `/goal` | core | `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/editor.rs` | — |
+| 2 | **STEP 6B** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/app.rs` | STEP 6A |
+| 3 | **STEP 6C** | `/goal` | core | `crates/scriptui-core/Cargo.toml`, `Cargo.lock`, `crates/scriptui-core/src/layout.rs` | STEP 6B |
+| 4 | **STEP 6D** | `/goal` | core | `crates/scriptui-core/src/editor.rs`, `crates/scriptui-tui/src/viewport.rs` | STEP 6C |
+| 5 | **STEP 6E** | `/goal` | tui | `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs` | STEP 6D |
+| 6 | **STEP 6F** | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` | STEP 6E |
+| 7 | **STEP 6G** | `/goal` | docs | `README.md` | STEP 6F |
 
 ### Completed
 
@@ -86,18 +61,17 @@ Floating Modals (rendered over Root with Clear + centered_rect when OverlayMode 
 | **STEP 4E** | Done (`0bdaf71`) | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs`, `crates/scriptui-tui/src/lib.rs` |
 | **STEP 4F** | Done (`af440cb`) | `/goal` | tui | `crates/scriptui-tui/src/mouse.rs`, `crates/scriptui-tui/src/lib.rs` |
 | **STEP 4G** | Done (`192900d`) | `/goal` | tui | `crates/scriptui-tui/src/app.rs`, `main.rs`, `Cargo.toml`, `lib.rs` |
+| **STEP 5A** | Done (`e9d0ac6`) | `/goal` | core | `crates/scriptui-core/src/keymap.rs`, `crates/scriptui-core/src/editor.rs` |
+| **STEP 5B** | Done (`83b727e`) | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs`, `crates/scriptui-tui/src/app.rs` |
+| **STEP 5C** | Done (`6cd4249`) | `/goal` | tui | `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/lib.rs` |
+| **STEP 5D** | Done (`0b651e9`) | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/lib.rs` |
+| **STEP 5E** | Done (`c2140a5`) | `/goal` | tui | `crates/scriptui-tui/src/palette.rs`, `crates/scriptui-tui/src/lib.rs` |
+| **STEP 5F** | Done (`d096a7f`) | `/goal` | tui | `crates/scriptui-tui/src/modals.rs`, `crates/scriptui-tui/src/lib.rs` |
+| **STEP 5G** | Done (`7199130`) | `/goal` | tui | `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/mouse.rs` |
 
 ### Future phases
 
-Outlines only (goal + step titles). Full step blocks are written at the phase review before each phase starts, followed by `neb plan import --write`, `scripts/phased-step.sh new-phase` (which regenerates `.orrery/phase.toml` for that phase), `orrery ingest STEPPED_IMPLEMENTATION_PLAN.md --marker "### STEP "`, and `orrery config set limits.max_deferred_steps <LIMIT>`.
-
-- **Phase 6: Integration Verification, Performance & Polish**
-  - Unicode display width & tab-stop expansion in `compute_wrapped_layout` (`BUG-0003`)
-  - Cached GFM parse & spellcheck diagnostics per document revision in `EditorState` / viewport
-  - Bracketed paste (`EnableBracketedPaste` + `Event::Paste`) & `Action::Paste` wiring
-  - Ratatui `TestBackend` snapshot render tests across all 5 palettes (CRT Amber GFM differentials, collapsed/split/full preview, Find/Replace, Command Palette, Spellcheck popup)
-  - End-to-end integration tests (multi-cursor editing, prose-safe smart indentation, GFM sync-scroll, custom Hunspell locale import)
-  - Large-file incremental highlight/spellcheck responsiveness benchmark and `README.md` keybinding reference
+_None — Phase 6 completes the ScripTUI baseline roadmap._
 
 ### Open Questions
 
@@ -106,69 +80,53 @@ _None._
 ### Parked
 
 Tracked in neb: `neb list --status pending`. Reviewed at phase end; only picked items become steps.
-- `BUG-0003`: `compute_wrapped_layout` measures `char` count rather than Unicode cell width and tab stops (scheduled for Phase 6 polish).
+_None — all open bugs (`BUG-0003` through `BUG-0009`) are scheduled in Phase 6._
 
 ---
 
-## Phase 5 Step Blocks
+## Phase 6 Step Blocks
 
-### STEP 5A: Core Phase 4 Review Fixes (`BUG-0002`, `BackTab+SHIFT`) & Overlay Action Helpers
+### STEP 6A: Document Revision Counter & `replace_active_match` Advancement Fix (`BUG-0006`)
 
 * **Recommended Command:** `/goal`
-* **Advances:** `BUG-0002`
+* **Advances:** `BUG-0006`
 
 ```text
 [STEP_ID]
-STEP 5A: Fix KeyChord::normalized for BackTab+SHIFT, fix handle_indent dedent offset clamping inside deleted whitespace (BUG-0002), and add Phase 5 overlay/modal helpers on EditorState in crates/scriptui-core.
+STEP 6A: Add a monotonic revision counter to DocumentBuffer and fix EditorState::replace_active_match to advance active_match past new_caret instead of resetting to 0 (BUG-0006).
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
-  - crates/scriptui-core/src/keymap.rs
+  - crates/scriptui-core/src/buffer.rs
   - crates/scriptui-core/src/editor.rs
 READ_ONLY_REFS:
-  - crates/scriptui-core/src/keymap.rs:65-87, 325-340 (KeyChord::normalized, BackTab/Tab bindings)
-  - crates/scriptui-core/src/editor.rs:39-48, 213-347, 620-666 (OverlayMode, EditorState, spell/theme methods, handle_indent)
-  - crates/scriptui-core/src/search.rs:113-150 (replace_all)
-  - crates/scriptui-core/src/spell.rs:153-210 (SpellEngine::load_locale, personal_mut, ignore_word)
-  - crates/scriptui-core/src/indent.rs:7-17 (IndentStyle, IndentConfig)
+  - crates/scriptui-core/src/buffer.rs:19-65, 146-160, 217-340 (DocumentBuffer struct, constructors, apply_insert, apply_delete, apply_raw_edit)
+  - crates/scriptui-core/src/editor.rs:272-278, 383-420 (update_find_matches, replace_active_match)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No ratatui or crossterm imports in scriptui-core.
   - No .unwrap() or .expect() in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub fn selected_text\b' crates/scriptui-core/src/editor.rs && grep -qE 'pub fn normalized\b' crates/scriptui-core/src/keymap.rs
+grep -qE 'pub struct DocumentBuffer\b' crates/scriptui-core/src/buffer.rs && grep -qE 'pub fn replace_active_match\b' crates/scriptui-core/src/editor.rs
 
 [MUTATION_SPEC]
-1. crates/scriptui-core/src/keymap.rs:
-   - In `KeyChord::normalized(self)`:
-     - When `self.code == KeyCode::BackTab` and `self.modifiers.shift && !self.modifiers.ctrl && !self.modifiers.alt`, return `Self { code: KeyCode::BackTab, modifiers: KeyModifiers::NONE }`.
-   - Add unit test `backtab_with_shift_normalizes_to_dedent` verifying `Keymap::default_cua().lookup(KeyChord::new(KeyCode::BackTab, KeyModifiers::SHIFT)) == Some(Action::Dedent)`.
+1. crates/scriptui-core/src/buffer.rs:
+   - Add `revision: u64` field to `DocumentBuffer`, initialized to `0` in `empty`, `from_str_content`, and `from_file`.
+   - Expose `pub fn revision(&self) -> u64 { self.revision }`.
+   - Increment `self.revision = self.revision.wrapping_add(1)` whenever content changes:
+     - in `apply_insert` (when `!edits.is_empty()` and any edit had `start < end || !text.is_empty()`),
+     - in `apply_delete` (when `!edits.is_empty()`),
+     - in `apply_raw_edit` (after applying the edit to `self.rope`).
+   - Add unit test `document_revision_increments_on_content_mutations` verifying `revision()` starts at `0`, increments on `apply_insert`, `apply_delete`, and `apply_raw_edit`, and does not change on `set_selection`.
 2. crates/scriptui-core/src/editor.rs:
-   - Fix `BUG-0002` dedent edge case in `handle_indent`:
-     - In `shift_offset(offset: usize) -> usize`: for each `edit` with `edit.start <= offset`, compute `inserted_len = edit.inserted.chars().count() as isize` and `deleted_len = (edit.end - edit.start) as isize`; if `offset < edit.end` (offset lies strictly inside a deleted range), contribute `inserted_len - (offset - edit.start) as isize` instead of `inserted_len - deleted_len`.
-   - Extend `OverlayMode` enum with two new variants:
-     - `OpenFilePrompt`
-     - `SaveAsPrompt`
-   - Add field `pub file_prompt_input: String` to `EditorState` (initialized to `String::new()` in `EditorState::new`).
-   - Update `dispatch`:
-     - `Action::OpenFile`: clear `self.file_prompt_input`, set `self.overlay = OverlayMode::OpenFilePrompt`.
-     - `Action::SaveAs`: set `self.file_prompt_input` to the active buffer's existing path string (or empty), set `self.overlay = OverlayMode::SaveAsPrompt`.
-     - `Action::Save`: if `self.buffers.active().document.path().is_none()`, set `self.file_prompt_input.clear()` and `self.overlay = OverlayMode::SaveAsPrompt` (instead of returning `MissingPath`), else save active buffer and set `self.status_message = Some("Saved".to_string())`.
-   - Add methods on `EditorState`:
-     - `pub fn switch_spell_locale(&mut self, locale: &str, search_dirs: &[PathBuf]) -> ScriptuiResult<()>`: loads `SpellEngine::load_locale(locale, search_dirs)?`, sets `self.spell_engine = Some(engine)` and `self.config.spell_locale = locale.to_string()`.
-     - `pub fn add_spell_popup_word_to_personal_dict(&mut self) -> bool`: if `self.spell_popup` and `self.spell_engine` are `Some`, calls `engine.personal_mut().add(&popup.diagnostic.word)`, clears `self.spell_popup = None`, sets `self.overlay = OverlayMode::None`, returns `true`.
-     - `pub fn ignore_spell_popup_word(&mut self) -> bool`: if `self.spell_popup` and `self.spell_engine` are `Some`, calls `engine.ignore_word(&popup.diagnostic.word)`, clears `self.spell_popup = None`, sets `self.overlay = OverlayMode::None`, returns `true`.
-     - `pub fn replace_active_match(&mut self) -> ScriptuiResult<bool>`: refreshes `update_find_matches()?` if needed; if `active_match` points to a valid `SearchMatch` `m`, replaces `m.start..m.end` with `self.find_replace.replacement` via `apply_raw_edit`, records an `EditTransaction` in undo history, moves caret to end of replacement, refreshes `update_find_matches()?`, and returns `Ok(true)`; else `Ok(false)`.
-     - `pub fn replace_all_matches(&mut self) -> ScriptuiResult<usize>`: calls `crate::search::replace_all(&mut active.document, &query, &replacement)?`; if non-empty, records an `EditTransaction`, refreshes `update_find_matches()?`, and returns `Ok(count)`.
-     - `pub fn toggle_indent_style(&mut self)`: cycles `self.config.indent.style`: `Spaces(4) => Spaces(2)`, `Spaces(2) => Tabs`, `_ => Spaces(4)`.
-     - `pub fn confirm_dirty_action(&mut self, force: bool)`: when `force` is `true`, if `self.overlay == OverlayMode::ConfirmQuit`, sets `self.should_quit = true` and `self.overlay = OverlayMode::None`; if `self.overlay == OverlayMode::ConfirmCloseBuffer`, calls `self.buffers.close_active(true)`, clears `find_replace.matches` & `active_match`, and sets `self.overlay = OverlayMode::None`. When `force` is `false`, sets `self.overlay = OverlayMode::None`.
-3. Unit tests in `crates/scriptui-core/src/editor.rs`:
-   - `dedent_inside_leading_whitespace_clamps_caret_to_line_start`: on `"one\n    two"`, places caret at `(1, 2)` (offset 6), dispatches `Action::Dedent`, and asserts caret is at `(1, 0)` (offset 4), not on line 0.
-   - `replace_active_and_all_and_spell_dict_helpers`: verifies `replace_active_match`, `replace_all_matches`, `add_spell_popup_word_to_personal_dict`, `ignore_spell_popup_word`, `toggle_indent_style`, and `confirm_dirty_action`.
+   - Fix `BUG-0006` in `EditorState::replace_active_match`:
+     - After `self.update_find_matches()?`, if `!self.find_replace.matches.is_empty()`, set `self.find_replace.active_match` to `self.find_replace.matches.iter().position(|next| next.start >= new_caret).or(Some(0))`.
+   - Add unit test `replace_active_match_advances_past_overlapping_replacement`:
+     - On `"foo bar foo baz foo"`, search `"foo"`, replace with `"foobar"` via `replace_active_match()` twice; assert the first replacement turns match 0 into `"foobar"` and advances `active_match` to the second `"foo"` (`Some(2)` or the match at `"foo baz"`), and the second replacement turns the second `"foo"` into `"foobar"` rather than re-replacing match 0 into `"foobarbar"`.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn replace_active_match\b' crates/scriptui-core/src/editor.rs && grep -qE 'pub fn confirm_dirty_action\b' crates/scriptui-core/src/editor.rs
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn revision\b' crates/scriptui-core/src/buffer.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -176,45 +134,216 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ---
 
-### STEP 5B: TUI Scroll Follow-Cursor Decoupling & Dirty-Redraw Event Loop
+### STEP 6B: TUI Modal Key/Mouse Trapping, Cached Palette Entries, Find Focus Reset & Preview Scroll Clamp (`BUG-0004`, `BUG-0005`, `BUG-0007`, `BUG-0008`, `BUG-0009`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0004`, `BUG-0005`, `BUG-0007`, `BUG-0008`, `BUG-0009`
+
+```text
+[STEP_ID]
+STEP 6B: Fix Phase 5 TUI review bugs: trap unhandled keys and block mouse events behind floating modals (BUG-0004, BUG-0005), reset FindBarState.focus on Alt+Enter (BUG-0007), cache Command Palette entries on TuiApp (BUG-0008), and clamp unsynced preview scroll to viewport height (BUG-0009).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/find_bar.rs
+  - crates/scriptui-tui/src/preview_pane.rs
+  - crates/scriptui-tui/src/app.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/find_bar.rs:117-158 (handle_find_bar_key Esc and Alt+Enter branches)
+  - crates/scriptui-tui/src/preview_pane.rs:10-65 (PreviewPaneState, render_preview_pane)
+  - crates/scriptui-tui/src/app.rs:42-75, 123-289 (TuiApp, render_frame, handle_key_event, handle_mouse_event)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn revision\b' crates/scriptui-core/src/buffer.rs && grep -qE 'pub struct PreviewPaneState\b' crates/scriptui-tui/src/preview_pane.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-tui/src/find_bar.rs:
+   - Fix `BUG-0007`: in `handle_find_bar_key`, inside the `KeyCode::Enter` `ALT` branch, also reset `bar_state.focus = FindFocus::Query;`.
+2. crates/scriptui-tui/src/preview_pane.rs:
+   - Fix `BUG-0009`: add `pub viewport_height: usize` to `PreviewPaneState` (initialized to `0` in `Default`).
+   - In `render_preview_pane`, set `pane_state.viewport_height = inner_height;` and when `!pane_state.sync_enabled`, clamp `pane_state.scroll_line = pane_state.scroll_line.min(pane_state.total_lines.saturating_sub(inner_height.max(1)));`.
+3. crates/scriptui-tui/src/app.rs:
+   - Add helper `fn is_blocking_modal(overlay: OverlayMode) -> bool` returning `true` for `OverlayMode::CommandPalette | OverlayMode::SpellQuickFix | OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer | OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt`.
+   - Fix `BUG-0008`: add `pub palette_entries: Vec<PaletteEntry>` to `TuiApp` (initialized to `Vec::new()` in `from_cli`), plus `pub fn refresh_palette_entries(&mut self)` that scans `[AppConfig::default_config_dir().join("dicts")]` via `discover_installed_locales` and stores `build_palette_entries(&locales)`.
+     - Call `self.refresh_palette_entries()` when `Action::OpenCommandPalette` is dispatched, and lazily if `self.palette_entries.is_empty()` inside `render_frame` / `handle_key_event` when `self.state.overlay == OverlayMode::CommandPalette`.
+     - Reuse `&self.palette_entries` in both `render_frame` and `handle_key_event` (no filesystem scan on every keypress or redraw).
+   - Fix `BUG-0004`: in `handle_key_event`, for every blocking modal arm (`CommandPalette`, `SpellQuickFix`, `ConfirmQuit | ConfirmCloseBuffer`, `OpenFilePrompt | SaveAsPrompt`), call its handler and unconditionally `return Ok(())` so unhandled keys never fall through to mutate the editor.
+   - Fix `BUG-0005`: at the top of `handle_mouse_event`, if `is_blocking_modal(self.state.overlay)`, return `Ok(false)` immediately.
+   - Fix `BUG-0009`: in `handle_mouse_event`'s preview wheel scroll branch, compute `max_scroll = self.preview_pane.total_lines.saturating_sub(self.preview_pane.viewport_height.max(1))`.
+4. Unit tests in `crates/scriptui-tui/src/app.rs`:
+   - `blocking_modals_trap_unhandled_keys_and_ignore_mouse`: open `ConfirmQuit` on dirty `"hello"`, send `'x'`, `Backspace`, and a left-click in the editor; assert document text is still `"hello"` and `overlay` remains `ConfirmQuit`.
+   - `alt_enter_resets_find_focus_and_palette_entries_cached`: verify `FindFocus::Query` after `Alt+Enter` from `Replacement` focus, and verify `app.palette_entries` is populated once on `Ctrl+P`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'is_blocking_modal' crates/scriptui-tui/src/app.rs && grep -qE 'palette_entries' crates/scriptui-tui/src/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6C: Unicode Display Width & Tab-Stop Expansion in `compute_wrapped_layout` (`BUG-0003`)
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0003`
+
+```text
+[STEP_ID]
+STEP 6C: Add unicode-width to scriptui-core and update compute_wrapped_layout in layout.rs to measure Unicode display cell width and tab-stop expansion (BUG-0003).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/Cargo.toml
+  - Cargo.lock
+  - crates/scriptui-core/src/layout.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/Cargo.toml:1-19 (dependencies)
+  - crates/scriptui-core/src/layout.rs:1-145 (VisualLine, WrappedLayout, compute_indent_guides, compute_wrapped_layout)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No ratatui or crossterm imports in scriptui-core.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn compute_wrapped_layout\b' crates/scriptui-core/src/layout.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/Cargo.toml:
+   - Add `unicode-width = "0.2"` under `[dependencies]` (already present in `Cargo.lock` as `0.2.0`, so no network fetch is required).
+2. crates/scriptui-core/src/layout.rs:
+   - Import `unicode_width::UnicodeWidthChar`.
+   - Add `pub fn char_display_width(ch: char, col_cells: usize, tab_width: usize) -> usize`:
+     - When `ch == '\t'`, return `let step = tab_width.max(1); step - (col_cells % step)`.
+     - Otherwise return `UnicodeWidthChar::width(ch).unwrap_or(0)`.
+   - Add `pub fn line_display_width(line: &str, tab_width: usize) -> usize` accumulating `char_display_width(ch, col, tab_width)`.
+   - Update `compute_wrapped_layout`:
+     - Use `line_display_width(&line, tab_width) <= width` for the fast single-line path.
+     - In the wrapping loop (`while start < chars.len()`):
+       - Walk `idx` from `start` accumulating `cell_width += char_display_width(chars[idx], cell_width, tab_width)` while `cell_width <= width` (always advancing at least 1 char if the very first char exceeds `width`, so the loop always makes progress).
+       - Let `max_end = idx`. If `max_end == chars.len()`, `end = max_end`; else if there is a whitespace char (`' '` or `'\t'`) in `start..max_end`, break at `ws + 1`; else hard-break at `max_end`.
+3. Unit tests in `crates/scriptui-core/src/layout.rs`:
+   - `soft_wrap_accounts_for_cjk_wide_chars_and_tab_stops`:
+     - Verify `"日本語テスト"` (6 chars, 12 display cells) wraps into 2 visual lines at `viewport_width = 6` (`char_start..char_end` = `0..3` and `3..6`).
+     - Verify `"\tabcdef"` with `tab_width = 4` (display width 4 + 6 = 10) wraps at `viewport_width = 8` (`0..5` or `0..1` at tab boundary, with every wrapped segment having display width `<= 8`).
+     - Verify a single wide char `"日"` at `viewport_width = 1` still makes progress and produces 1 visual line `(0..1)` without infinite looping.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn char_display_width\b' crates/scriptui-core/src/layout.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6D: Cached GFM Parse & Spellcheck Diagnostics per Document Revision
 
 * **Recommended Command:** `/goal`
 
 ```text
 [STEP_ID]
-STEP 5B: Decouple mouse-wheel scrolling from ensure_cursor_visible via follow_cursor flag and gate TuiApp::run_event_loop redraws on input events in crates/scriptui-tui.
+STEP 6D: Cache parsed GfmDocument and spellcheck Vec<SpellDiagnostic> per (buffer_index, document revision, spell_revision) on EditorState and consume the cache in render_editor_viewport and open_spell_quick_fix_at_cursor.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
+  - crates/scriptui-core/src/editor.rs
   - crates/scriptui-tui/src/viewport.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/editor.rs:213-385 (EditorState fields, new, open_spell_quick_fix_at_cursor, switch_spell_locale, add_spell_popup_word_to_personal_dict, ignore_spell_popup_word)
+  - crates/scriptui-tui/src/viewport.rs:165-190 (render_editor_viewport GFM parse and spellcheck calls)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - No ratatui or crossterm imports in scriptui-core.
+  - No .unwrap() or .expect() in non-test code.
+
+[PRE_GATE]
+grep -qE 'pub fn revision\b' crates/scriptui-core/src/buffer.rs && grep -qE 'pub fn render_editor_viewport\b' crates/scriptui-tui/src/viewport.rs
+
+[MUTATION_SPEC]
+1. crates/scriptui-core/src/editor.rs:
+   - Define private struct `AnalysisCache`:
+     - `buffer_index: usize`
+     - `doc_revision: u64`
+     - `spell_revision: u64`
+     - `gfm: crate::markdown::GfmDocument`
+     - `spell_diagnostics: Vec<crate::spell::SpellDiagnostic>`
+   - Add private fields to `EditorState`:
+     - `spell_revision: u64` (initialized to `0`)
+     - `analysis_cache: Option<AnalysisCache>` (initialized to `None`)
+     - `analysis_recomputes: u64` (initialized to `0`)
+   - Increment `self.spell_revision = self.spell_revision.wrapping_add(1)` in `switch_spell_locale`, `add_spell_popup_word_to_personal_dict`, and `ignore_spell_popup_word`.
+   - Invalidate `self.analysis_cache = None` whenever the active buffer's document is replaced or buffers are closed/switched (`NewBuffer`, `CloseBuffer`, `NextBuffer`, `PrevBuffer`, `confirm_dirty_action` close).
+   - Add `pub fn active_analysis(&mut self) -> (&crate::markdown::GfmDocument, &[crate::spell::SpellDiagnostic])`:
+     - Checks if `self.analysis_cache` matches `(self.buffers.active_index(), self.buffers.active().document.revision(), self.spell_revision)`.
+     - If not, computes `let text = self.buffers.active().document.text(); let gfm = parse_gfm(&text); let spell_diagnostics = self.spell_engine.as_ref().map(|e| e.check_document(&text, &gfm.spell_skip_byte_ranges)).unwrap_or_default();`, stores `AnalysisCache`, and increments `self.analysis_recomputes += 1`.
+     - Returns references to `(&cache.gfm, &cache.spell_diagnostics)`.
+   - Add `pub fn analysis_recompute_count(&self) -> u64 { self.analysis_recomputes }`.
+   - Update `open_spell_quick_fix_at_cursor(&mut self)` to read diagnostics via `self.active_analysis()` instead of reparsing GFM and re-running spellcheck unconditionally.
+   - Add unit test `active_analysis_caches_across_unchanged_revisions_and_invalidates_on_edit_or_spell_change` verifying `analysis_recompute_count()` stays `1` on repeated calls without edits, increments to `2` after `insert_text`, and increments to `3` after `ignore_spell_popup_word`.
+2. crates/scriptui-tui/src/viewport.rs:
+   - In `render_editor_viewport`, replace the direct `parse_gfm(&text)` and `state.spell_engine.as_ref().map(...)` calls with `let (gfm_doc, spell_diagnostics) = { let (g, s) = state.active_analysis(); (g.clone(), s.to_vec()) };` (or borrow directly while rendering so `parse_gfm` and `check_document` are not re-executed on scroll/cursor moves).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn active_analysis\b' crates/scriptui-core/src/editor.rs && grep -qE 'active_analysis' crates/scriptui-tui/src/viewport.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 6E: Bracketed Paste (`EnableBracketedPaste` + `Event::Paste`) Wiring
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 6E: Enable bracketed paste in TerminalGuard and wire Event::Paste through TuiApp::handle_paste_event in crates/scriptui-tui.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/terminal.rs
   - crates/scriptui-tui/src/app.rs
 READ_ONLY_REFS:
-  - crates/scriptui-tui/src/viewport.rs:96-155 (render_editor_viewport)
-  - crates/scriptui-tui/src/app.rs:31-75, 116-208 (TuiApp, render_frame, handle_key_event, handle_mouse_event, run_event_loop)
+  - crates/scriptui-tui/src/terminal.rs:1-70 (TerminalGuard::enter, restore_terminal_best_effort)
+  - crates/scriptui-tui/src/app.rs:151-324 (handle_key_event, run_event_loop)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
   - No .unwrap() or .expect() in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub fn render_editor_viewport\b' crates/scriptui-tui/src/viewport.rs && grep -qE 'pub struct TuiApp\b' crates/scriptui-tui/src/app.rs
+grep -qE 'pub struct TerminalGuard\b' crates/scriptui-tui/src/terminal.rs && grep -qE 'pub fn run_event_loop\b' crates/scriptui-tui/src/app.rs
 
 [MUTATION_SPEC]
-1. crates/scriptui-tui/src/viewport.rs:
-   - Update signature of `render_editor_viewport` to:
-     `pub fn render_editor_viewport(frame: &mut Frame, area: Rect, state: &mut EditorState, follow_cursor: bool) -> (ViewportMetrics, WrappedLayout)`
-   - When `follow_cursor` is `true`, call `ensure_cursor_visible(...)` as before.
-   - When `follow_cursor` is `false`, only clamp `active.scroll_line = active.scroll_line.min(layout.len_visual_lines().saturating_sub(1))` (and set `active.scroll_col = 0` if `soft_wrap`) without snapping `scroll_line` back to `cursor_visual`.
-   - Update existing unit tests in `viewport.rs` to pass `true` for `follow_cursor`, and add unit test `viewport_preserves_manual_scroll_when_follow_cursor_is_false` verifying that with 20 lines, caret on line 0, `scroll_line = 10`, and `follow_cursor = false`, `active.scroll_line` stays `10` after rendering.
+1. crates/scriptui-tui/src/terminal.rs:
+   - Import `DisableBracketedPaste` and `EnableBracketedPaste` from `crossterm::event`.
+   - In `TerminalGuard::enter()`, execute `EnableBracketedPaste` alongside `EnterAlternateScreen` and `EnableMouseCapture`.
+   - In `restore_terminal_best_effort()`, execute `DisableBracketedPaste` alongside `LeaveAlternateScreen`, `DisableMouseCapture`, and `Show`.
 2. crates/scriptui-tui/src/app.rs:
-   - Add `pub follow_cursor: bool` to `TuiApp` (initialized to `true` in `from_cli`).
-   - In `render_frame`, pass `self.follow_cursor` to `render_editor_viewport(frame, editor_rect, &mut self.state, self.follow_cursor)`.
-   - In `handle_key_event`, set `self.follow_cursor = true` when a key is processed (`KeyEventKind::Press`).
-   - In `handle_mouse_event`, set `self.follow_cursor = false` when `mouse.kind` is `MouseEventKind::ScrollUp | MouseEventKind::ScrollDown`, and set `self.follow_cursor = true` on `MouseEventKind::Down(MouseButton::Left | MouseButton::Right)`.
-   - In `run_event_loop`, add `let mut needs_redraw = true;` before the loop; only call `guard.terminal_mut().draw(...)` when `needs_redraw` is `true` (then reset `needs_redraw = false`), and set `needs_redraw = true` when `Event::Key`, `Event::Mouse`, or `Event::Resize` is read.
-   - Add unit test `mouse_wheel_scroll_not_snapped_back_on_next_render` in `app.rs` verifying that after rendering a 20-line document, handling `ScrollDown`, and re-rendering, `scroll_line` remains `3` until a key event re-enables `follow_cursor`.
+   - Add `pub fn handle_paste_event(&mut self, text: &str) -> ScriptuiResult<()>`:
+     - Normalize line endings: `let normalized = text.replace("\r\n", "\n").replace('\r', "\n");`
+     - `let single_line = normalized.replace('\n', " ");`
+     - Match `self.state.overlay`:
+       - `OverlayMode::None` → `self.state.insert_text(&normalized); self.follow_cursor = true;`
+       - `OverlayMode::Find` → `self.state.find_replace.query.pattern.push_str(&single_line);` and refresh `update_find_matches()` (capturing `InvalidRegex` into `status_message` without failing).
+       - `OverlayMode::Replace` → if `self.find_bar.focus == FindFocus::Replacement`, push `&single_line` to `self.state.find_replace.replacement`; else push `&single_line` to `self.state.find_replace.query.pattern` and refresh `update_find_matches()`.
+       - `OverlayMode::CommandPalette` → push `&single_line` to `self.state.palette.query`, reset `self.state.palette.selected_index = 0`.
+       - `OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt` → push `&single_line` to `self.state.file_prompt_input`.
+       - `OverlayMode::SpellQuickFix | OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer` → ignore paste.
+     - Return `Ok(())`.
+   - In `run_event_loop`: handle `Event::Paste(text)` by calling `if let Err(err) = self.handle_paste_event(&text) { self.state.status_message = Some(err.to_string()); }` and setting `needs_redraw = true;`.
+3. Unit tests in `crates/scriptui-tui/src/app.rs`:
+   - `bracketed_paste_routes_to_editor_find_bar_and_ignores_confirm_modal`:
+     - Pastes `"line1\r\nline2"` in `OverlayMode::None` and asserts buffer text is `"line1\nline2"`.
+     - Opens `OverlayMode::Find`, pastes `"line2"`, and asserts `find_replace.query.pattern == "line2"` and `find_replace.matches.len() == 1`.
+     - Opens `OverlayMode::ConfirmQuit`, pastes `"ignored"`, and asserts buffer text is still `"line1\nline2"`.
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'follow_cursor: bool' crates/scriptui-tui/src/viewport.rs && grep -qE 'needs_redraw' crates/scriptui-tui/src/app.rs
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'EnableBracketedPaste' crates/scriptui-tui/src/terminal.rs && grep -qE 'pub fn handle_paste_event\b' crates/scriptui-tui/src/app.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -222,49 +351,47 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ---
 
-### STEP 5C: Styled GFM Preview Pane Widget with Synchronized Scrolling
+### STEP 6F: Multi-Palette `TestBackend` Snapshot Suite, E2E Integration Tests & Large-File Responsiveness Check
 
 * **Recommended Command:** `/goal`
 
 ```text
 [STEP_ID]
-STEP 5C: Implement styled GFM PreviewPane renderer with synchronized source-line scrolling in crates/scriptui-tui/src/preview_pane.rs.
+STEP 6F: Create comprehensive Ratatui TestBackend integration test suite in crates/scriptui-tui/tests/tui_integration.rs covering all 5 palettes, preview modes, multi-cursor editing, prose-safe indentation, custom Hunspell locale import, and large-file cached render responsiveness.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
-  - crates/scriptui-tui/src/preview_pane.rs (NEW)
-  - crates/scriptui-tui/src/lib.rs
+  - crates/scriptui-tui/tests/tui_integration.rs (NEW)
 READ_ONLY_REFS:
-  - crates/scriptui-core/src/preview.rs:8-51 (PreviewLine, PreviewDocument, source_line_to_preview_line, preview_line_to_source_line)
-  - crates/scriptui-tui/src/layout_tree.rs:80-112 (rgb_to_color, segment_to_style)
-  - crates/scriptui-tui/src/lib.rs:1-21 (module declarations & re-exports)
+  - crates/scriptui-core/src/theme.rs:1-310 (builtin_theme_names, resolve_theme, CRT Amber palette tokens)
+  - crates/scriptui-tui/src/app.rs:42-324 (TuiApp, render_frame, handle_key_event, handle_mouse_event, handle_paste_event)
+  - crates/scriptui-tui/src/cli.rs:1-120 (Cli, execute_dict_import)
+  - crates/scriptui-tui/src/palette.rs:32-105 (discover_installed_locales, build_palette_entries, handle_palette_key)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
-  - No .unwrap() or .expect() in non-test code.
+  - No production crate modifications.
 
 [PRE_GATE]
-grep -qE 'pub fn source_line_to_preview_line\b' crates/scriptui-core/src/preview.rs && grep -qE 'pub fn segment_to_style\b' crates/scriptui-tui/src/layout_tree.rs
+grep -qE 'pub fn active_analysis\b' crates/scriptui-core/src/editor.rs && grep -qE 'pub fn handle_paste_event\b' crates/scriptui-tui/src/app.rs
 
 [MUTATION_SPEC]
-1. crates/scriptui-tui/src/lib.rs — add `pub mod preview_pane;` and `pub use preview_pane::{PreviewPaneState, compute_synced_preview_scroll, render_preview_pane};`.
-2. crates/scriptui-tui/src/preview_pane.rs (NEW) — implement:
-   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct PreviewPaneState { pub scroll_line: usize, pub total_lines: usize, pub sync_enabled: bool }` with `impl Default` setting `scroll_line: 0, total_lines: 0, sync_enabled: true`.
-   - `pub fn compute_synced_preview_scroll(preview_doc: &PreviewDocument, editor_top_source_line: usize, viewport_height: usize) -> usize`:
-     - Calls `let target = preview_doc.source_line_to_preview_line(editor_top_source_line);`
-     - Clamps `target` to `0..=preview_doc.lines.len().saturating_sub(viewport_height.max(1))`.
-   - `pub fn render_preview_pane(frame: &mut Frame, area: Rect, state: &EditorState, pane_state: &mut PreviewPaneState, editor_top_source_line: usize)`:
-     - Early-returns if `area.width < 2 || area.height < 2`.
-     - Computes `inner_width = area.width.saturating_sub(2).max(1) as usize` and `inner_height = area.height.saturating_sub(2).max(1) as usize`.
-     - Builds `preview_doc = state.build_active_preview(inner_width)`.
-     - Updates `pane_state.total_lines = preview_doc.lines.len()`.
-     - If `pane_state.sync_enabled`, sets `pane_state.scroll_line = compute_synced_preview_scroll(&preview_doc, editor_top_source_line, inner_height)`; else clamps `pane_state.scroll_line` to `0..=pane_state.total_lines.saturating_sub(1)`.
-     - Converts each visible `PreviewLine` in `pane_state.scroll_line..(pane_state.scroll_line + inner_height)` to a Ratatui `Line` by mapping each `StyledSegment` to `Span::styled(seg.text.clone(), style)` via `segment_to_style(seg)` (filling `bg` with `theme.palette.background` when `seg.bg.is_none()`).
-     - Renders inside a `Block::default().borders(Borders::ALL)` titled `" Preview [SYNC] "` when `sync_enabled` else `" Preview "`, styled with `theme.palette.border_default`, `theme.palette.foreground`, and `theme.palette.background`.
-3. Tests in `crates/scriptui-tui/src/preview_pane.rs` (`#[cfg(test)] mod tests`):
-   - `preview_pane_renders_styled_gfm_and_syncs_scroll`: populates an `EditorState` with a GFM heading, task list (`- [x] Done`), alert (`> [!WARNING]\n> Watch out`), and pipe table; renders on `TestBackend::new(60, 14)`, asserts heading cell fg equals `rgb_to_color(theme.palette.md_h1)`, rendered text contains `"✓"` / `"[WARNING]"` / box-drawing `'┌'` or `'│'`, and verifies `compute_synced_preview_scroll` advances when `editor_top_source_line` increases.
+1. Create `crates/scriptui-tui/tests/tui_integration.rs` with 5 integration tests:
+   - `all_five_builtin_palettes_render_with_distinct_colors_and_crt_amber_gfm_differentials`:
+     - Iterates over every name in `scriptui_core::builtin_theme_names()` (`crt_amber`, `phosphor_green`, `ice_cyan`, `monochrome_amber_paper`, `obsidian_copper`), initializes `TuiApp::from_cli`, inserts GFM sample (`"# H1 Title\n## H2 Sub\n**bold** *italic* `code`\n- [x] task\n"`), renders on `TestBackend::new(100, 24)`, and asserts status bar shows the theme name and background cells match `rgb_to_color(theme.palette.background)`.
+     - For `crt_amber`, asserts rendered H1 cell fg equals `rgb_to_color(palette.md_h1)` and differs from H2 cell fg (`md_h2`) and inline code cell fg (`md_code_fg`).
+   - `preview_modes_sync_scroll_and_independent_wheel_scroll`:
+     - Tests `PreviewMode::Collapsed` (edge tab `'◀'` visible), `PreviewMode::Split` (split divider + `"Preview [SYNC]"` visible), and `PreviewMode::Expanded` (full-width preview).
+     - Verifies wheel scroll over the preview region disables sync (`!app.preview_pane.sync_enabled`), clamps scroll within `total_lines.saturating_sub(viewport_height.max(1))`, and toggling preview re-enables sync.
+   - `multicursor_find_handoff_and_prose_safe_indentation_e2e`:
+     - Tests `Ctrl+F` → `"item"` → `Alt+Enter` multi-cursor handoff → typing replacement → `Ctrl+Z` atomic undo restoring original text.
+     - Tests prose-safe indentation: `"- first"` + `Enter` continues `"- "`, second `Enter` clears empty list marker, `Tab` indents, and `BackTab+SHIFT` dedents cleanly.
+   - `custom_hunspell_locale_import_discovery_and_palette_switch`:
+     - Creates temp source `.aff` + `.dic` files for a custom locale `"xx_TEST"` containing `"zorkle"`, imports via `execute_dict_import` into a temp `dicts` dir, verifies `discover_installed_locales(&[dicts_dir])` includes `"xx_TEST"`, builds palette entries, opens `OverlayMode::CommandPalette`, types `"xx_TEST"`, presses `Enter` via `handle_palette_key`, and asserts `state.config.spell_locale == "xx_TEST"` and `"zorkle"` produces zero spell diagnostics.
+   - `large_file_cached_analysis_and_viewport_render_responsiveness`:
+     - Builds a 5,000-line GFM document (`# Section N\nParagraph with **bold** and `code`.\n\n`), renders 10 consecutive frames while scrolling down via `MouseEventKind::ScrollDown` on `TestBackend::new(100, 30)`, asserts `app.state.analysis_recompute_count() == 1` (zero redundant GFM/spell recomputes during scrolling), and asserts average frame render completes well within a generous CI-safe bound (`< 500ms` total for all 10 scroll frames).
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn render_preview_pane\b' crates/scriptui-tui/src/preview_pane.rs && grep -qE 'pub fn compute_synced_preview_scroll\b' crates/scriptui-tui/src/preview_pane.rs
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && test -f crates/scriptui-tui/tests/tui_integration.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
@@ -272,260 +399,38 @@ Halt immediately after POST_GATE exits 0 and report verification status.
 
 ---
 
-### STEP 5D: Inline Find/Replace Bar Widget & Interactive Key Router
+### STEP 6G: `README.md` Keybinding Reference, Theme/Locale Guide & Usage Documentation
 
 * **Recommended Command:** `/goal`
 
 ```text
 [STEP_ID]
-STEP 5D: Implement inline Find/Replace bar widget and keyboard router (plain/regex/case/whole-word toggles and Alt+Enter multi-cursor handoff) in crates/scriptui-tui/src/find_bar.rs.
+STEP 6G: Author README.md documenting ScripTUI architecture, build/run/CLI commands, all 5 built-in retro-futuristic palettes, custom theme and Hunspell dictionary installation, and full CUA keybinding & mouse reference.
 
 [SCOPE_LOCK]
 ALLOWED_FILES:
-  - crates/scriptui-tui/src/find_bar.rs (NEW)
-  - crates/scriptui-tui/src/lib.rs
+  - README.md (NEW)
 READ_ONLY_REFS:
-  - crates/scriptui-core/src/editor.rs:39-67, 268-274 (OverlayMode, FindReplaceState, update_find_matches, replace_active_match, replace_all_matches)
-  - crates/scriptui-tui/src/layout_tree.rs:16-45, 80-83 (find_bar region, rgb_to_color)
+  - crates/scriptui-core/src/keymap.rs:280-360 (Keymap::default_cua bindings)
+  - crates/scriptui-core/src/theme.rs:270-305 (builtin_theme_names)
+  - crates/scriptui-tui/src/cli.rs:1-80 (Cli flags and dict import subcommand)
 FORBIDDEN_SCOPE:
   - Any file not listed in ALLOWED_FILES.
-  - No .unwrap() or .expect() in non-test code.
 
 [PRE_GATE]
-grep -qE 'pub fn replace_active_match\b' crates/scriptui-core/src/editor.rs && grep -qE 'pub fn render_preview_pane\b' crates/scriptui-tui/src/preview_pane.rs
+test -f crates/scriptui-tui/tests/tui_integration.rs
 
 [MUTATION_SPEC]
-1. crates/scriptui-tui/src/lib.rs — add `pub mod find_bar;` and `pub use find_bar::{FindBarState, FindFocus, handle_find_bar_key, render_find_bar};`.
-2. crates/scriptui-tui/src/find_bar.rs (NEW) — implement:
-   - `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum FindFocus { #[default] Query, Replacement }`
-   - `#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] pub struct FindBarState { pub focus: FindFocus }`
-   - `pub fn render_find_bar(frame: &mut Frame, area: Rect, state: &EditorState, bar_state: FindBarState)`:
-     - Early-returns if `area.width == 0 || area.height == 0`.
-     - Computes match counter string: if `state.find_replace.matches.is_empty()` then `"0/0"`, else `format!("{}/{}", state.find_replace.active_match.unwrap_or(0) + 1, state.find_replace.matches.len())`.
-     - Renders row 0 on `theme.palette.surface`: `" Find: "` + `state.find_replace.query.pattern` (highlighted with `accent` when `focus == FindFocus::Query`) + match counter + toggle pills `[Aa]` (accent when `case_sensitive`), `[W]` (accent when `whole_word`), `[.*]` (accent when `use_regex`), and `"[Alt+Enter: All]"`.
-     - When `state.overlay == OverlayMode::Replace` and `area.height >= 2`, renders row 1: `" Replace: "` + `state.find_replace.replacement` (highlighted with `accent` when `focus == FindFocus::Replacement`) + `" [Enter: Replace] [Ctrl+Enter: All]"`.
-   - `pub fn handle_find_bar_key(key: KeyEvent, state: &mut EditorState, bar_state: &mut FindBarState) -> ScriptuiResult<bool>`:
-     - Returns `Ok(false)` if `state.overlay` is neither `OverlayMode::Find` nor `OverlayMode::Replace`.
-     - `KeyCode::Esc` → sets `state.overlay = OverlayMode::None`, resets `bar_state.focus = FindFocus::Query`, returns `Ok(true)`.
-     - `KeyCode::Tab` / `KeyCode::BackTab` → when `OverlayMode::Replace`, toggles `bar_state.focus` between `Query` and `Replacement`, returns `Ok(true)`.
-     - `KeyCode::Enter` with `ALT` → dispatches `Action::SelectAllOccurrences`, sets `state.overlay = OverlayMode::None`, returns `Ok(true)`.
-     - `KeyCode::Enter` with `CONTROL` (in `OverlayMode::Replace`) → calls `state.replace_all_matches()?`, sets `status_message`, returns `Ok(true)`.
-     - `KeyCode::Enter` with `SHIFT` → dispatches `Action::FindPrev`, returns `Ok(true)`.
-     - `KeyCode::Enter` (no modifiers) → if `OverlayMode::Replace && bar_state.focus == FindFocus::Replacement`, calls `state.replace_active_match()?`; else dispatches `Action::FindNext`; returns `Ok(true)`.
-     - `KeyCode::Char('c')` with `ALT` → toggles `query.case_sensitive`, refreshes `update_find_matches()?`, returns `Ok(true)`.
-     - `KeyCode::Char('w')` with `ALT` → toggles `query.whole_word`, refreshes `update_find_matches()?`, returns `Ok(true)`.
-     - `KeyCode::Char('r')` with `ALT` → toggles `query.use_regex`, refreshes `update_find_matches` (recording `InvalidRegex` into `status_message` without crashing), returns `Ok(true)`.
-     - `KeyCode::Backspace` → pops last char from focused field (`query.pattern` or `replacement`); refreshes matches if editing `Query`; returns `Ok(true)`.
-     - `KeyCode::Char(c)` (without `CONTROL | ALT`) → pushes `c` to focused field; refreshes matches if editing `Query` (capturing regex errors into `status_message`); returns `Ok(true)`.
-     - Any other key returns `Ok(false)`.
-3. Tests in `crates/scriptui-tui/src/find_bar.rs` (`#[cfg(test)] mod tests`):
-   - `find_bar_typing_toggles_replace_and_alt_enter_multicursor`: opens `OverlayMode::Replace` on `"foo bar foo"`, types `"foo"`, asserts rendered bar shows `"1/2"` and `[Aa]`, toggles `Alt+c`, tabs to replacement, types `"baz"`, triggers `Alt+Enter` on `"foo"` and verifies 2 multi-cursor selections are active and overlay closes.
+1. Create `README.md` at the repository root covering:
+   - Overview of ScripTUI (workspace crates `scriptui-core` and `scriptui-tui`, Ratatui + Crossterm TUI, Ropey rope buffer, GFM syntax highlighting & live styled preview, embedded Hunspell `en_US` spellcheck).
+   - Quick Start: `cargo build --release`, `cargo run -p scriptui-tui -- [FILE...]`, CLI flags (`--theme <NAME>`, `--locale <LOCALE>`), and `scriptui dict import --locale <LOCALE> --aff <PATH> --dic <PATH>`.
+   - Built-in Palettes table listing all 5 palettes (`crt_amber`, `phosphor_green`, `ice_cyan`, `monochrome_amber_paper`, `obsidian_copper`) and custom TOML theme path (`~/.config/scriptui/themes/`).
+   - Complete CUA Keybindings reference table matching `Keymap::default_cua()` (File/Buffer, Editing & Indentation, Find/Replace & Multi-Cursor, Overlays & Preview, Navigation) plus Find/Replace inline shortcuts (`Alt+C`, `Alt+W`, `Alt+R`, `Alt+Enter`, `Ctrl+Enter`, `Tab`).
+   - Mouse interactions (left-click caret, drag selection, wheel scroll on editor vs. preview, tab switching, right-click spellcheck quick-fix, preview edge-tab click, split divider drag).
+   - Verification commands (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`).
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn render_find_bar\b' crates/scriptui-tui/src/find_bar.rs && grep -qE 'pub fn handle_find_bar_key\b' crates/scriptui-tui/src/find_bar.rs
-
-[HALT_INVARIANT]
-Halt immediately after POST_GATE exits 0 and report verification status.
-```
-
----
-
-### STEP 5E: Fuzzy Command Palette Overlay (Themes, Locales, Toggles & Actions)
-
-* **Recommended Command:** `/goal`
-
-```text
-[STEP_ID]
-STEP 5E: Implement fuzzy Command Palette overlay widget and key handler supporting editor commands, live theme switching, spellcheck locale switching, and indent-style cycling in crates/scriptui-tui/src/palette.rs.
-
-[SCOPE_LOCK]
-ALLOWED_FILES:
-  - crates/scriptui-tui/src/palette.rs (NEW)
-  - crates/scriptui-tui/src/lib.rs
-READ_ONLY_REFS:
-  - crates/scriptui-core/src/editor.rs:69-205, 341-346 (CommandEntry, CommandPaletteState, switch_theme, switch_spell_locale, toggle_indent_style)
-  - crates/scriptui-core/src/theme.rs:279-290 (builtin_theme_names)
-  - crates/scriptui-tui/src/layout_tree.rs:80-83 (rgb_to_color)
-FORBIDDEN_SCOPE:
-  - Any file not listed in ALLOWED_FILES.
-  - No .unwrap() or .expect() in non-test code.
-
-[PRE_GATE]
-grep -qE 'pub fn handle_find_bar_key\b' crates/scriptui-tui/src/find_bar.rs && grep -qE 'pub fn builtin_theme_names\b' crates/scriptui-core/src/theme.rs
-
-[MUTATION_SPEC]
-1. crates/scriptui-tui/src/lib.rs — add `pub mod palette;` and `pub use palette::{PaletteEntry, PaletteItemKind, build_palette_entries, discover_installed_locales, filter_palette_entries, handle_palette_key, render_command_palette};`.
-2. crates/scriptui-tui/src/palette.rs (NEW) — implement:
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub enum PaletteItemKind { Action(Action), Theme(String), Locale(String), ToggleIndentStyle }`
-   - `#[derive(Debug, Clone, PartialEq, Eq)] pub struct PaletteEntry { pub id: String, pub label: String, pub kind: PaletteItemKind }`
-   - `pub fn discover_installed_locales(dict_dirs: &[PathBuf]) -> Vec<String>`:
-     - Always includes `"en_US"`; scans each dir in `dict_dirs` for `<locale>.dic` files that also have a sibling `<locale>.aff`, returning a sorted deduplicated `Vec<String>`.
-   - `pub fn build_palette_entries(extra_locales: &[String]) -> Vec<PaletteEntry>`:
-     - Starts with `CommandPaletteState::default_commands()` mapped to `PaletteItemKind::Action(cmd.action)`.
-     - Appends `"indent.cycle_style"` / `"Indent: Cycle Style (Spaces 4 / Spaces 2 / Tabs)"` (`PaletteItemKind::ToggleIndentStyle`).
-     - Appends one entry per `&name` in `builtin_theme_names()`: `id: format!("theme.{name}")`, `label: format!("Theme: {name}")`, `kind: PaletteItemKind::Theme(name.to_string())`.
-     - Appends one entry per locale in `extra_locales` (deduplicated, always ensuring `"en_US"` is included): `id: format!("locale.{loc}")`, `label: format!("Spell Locale: {loc}")`, `kind: PaletteItemKind::Locale(loc.clone())`.
-   - `pub fn filter_palette_entries<'a>(entries: &'a [PaletteEntry], query: &str) -> Vec<&'a PaletteEntry>`:
-     - Substring matches on `label`/`id` (case-insensitive) first, followed by ordered-subsequence fuzzy matches.
-   - `pub fn render_command_palette(frame: &mut Frame, area: Rect, state: &EditorState, entries: &[PaletteEntry])`:
-     - Computes centered modal rect (`width = area.width.min(60).max(20).min(area.width)`, `height = area.height.min(14).max(5).min(area.height)`).
-     - Clears region with `ratatui::widgets::Clear`, renders bordered `Block` titled `" Command Palette "` with `border_focused`.
-     - Row 0 inside block: `"> "` + `state.palette.query`.
-     - Remaining rows: filtered entries, highlighting `state.palette.selected_index` with `accent` bg / `background` fg (bold).
-   - `pub fn handle_palette_key(key: KeyEvent, state: &mut EditorState, entries: &[PaletteEntry], theme_dirs: &[PathBuf], dict_dirs: &[PathBuf]) -> ScriptuiResult<bool>`:
-     - Returns `Ok(false)` if `state.overlay != OverlayMode::CommandPalette`.
-     - `KeyCode::Esc` → closes overlay (`OverlayMode::None`), clears `state.palette.query`, returns `Ok(true)`.
-     - `KeyCode::Up` / `KeyCode::Down` → moves `state.palette.selected_index` within filtered list bounds, returns `Ok(true)`.
-     - `KeyCode::Backspace` → pops char from `state.palette.query`, resets `selected_index = 0`, returns `Ok(true)`.
-     - `KeyCode::Char(c)` (without `CONTROL | ALT`) → pushes `c` to `state.palette.query`, resets `selected_index = 0`, returns `Ok(true)`.
-     - `KeyCode::Enter` → executes selected `PaletteEntry`:
-       - closes `OverlayMode::None` and clears `state.palette.query` first (so actions like `OpenFind` can set their own overlay),
-       - `Action(a)` → `state.dispatch(a)?`,
-       - `Theme(name)` → `state.switch_theme(&name, theme_dirs)?` and sets `status_message`,
-       - `Locale(loc)` → `state.switch_spell_locale(&loc, dict_dirs)?` and sets `status_message`,
-       - `ToggleIndentStyle` → `state.toggle_indent_style()` and sets `status_message`,
-       - returns `Ok(true)`.
-3. Tests in `crates/scriptui-tui/src/palette.rs` (`#[cfg(test)] mod tests`):
-   - `command_palette_fuzzy_filters_and_switches_theme_and_renders`: opens `OverlayMode::CommandPalette`, types `"phgr"`, verifies `"Theme: phosphor_green"` is top fuzzy match, renders on `TestBackend::new(80, 20)` asserting `"Command Palette"` and `"phosphor_green"`, sends `Enter`, and asserts `state.theme.name == "phosphor_green"` and `state.overlay == OverlayMode::None`.
-
-[POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn render_command_palette\b' crates/scriptui-tui/src/palette.rs && grep -qE 'pub fn handle_palette_key\b' crates/scriptui-tui/src/palette.rs
-
-[HALT_INVARIANT]
-Halt immediately after POST_GATE exits 0 and report verification status.
-```
-
----
-
-### STEP 5F: Spellcheck Quick-Fix Popup, Open/Save-As Prompt & Dirty-Exit Modals
-
-* **Recommended Command:** `/goal`
-
-```text
-[STEP_ID]
-STEP 5F: Implement Spellcheck quick-fix popup, Open/Save-As file path prompt, and Dirty-Exit/Close confirmation modal widgets and key routers in crates/scriptui-tui/src/modals.rs.
-
-[SCOPE_LOCK]
-ALLOWED_FILES:
-  - crates/scriptui-tui/src/modals.rs (NEW)
-  - crates/scriptui-tui/src/lib.rs
-READ_ONLY_REFS:
-  - crates/scriptui-core/src/editor.rs:39-48, 206-211, 276-340 (OverlayMode, SpellQuickFixState, apply_selected_spell_fix, add_spell_popup_word_to_personal_dict, ignore_spell_popup_word, confirm_dirty_action)
-  - crates/scriptui-tui/src/layout_tree.rs:80-83 (rgb_to_color)
-FORBIDDEN_SCOPE:
-  - Any file not listed in ALLOWED_FILES.
-  - No .unwrap() or .expect() in non-test code.
-
-[PRE_GATE]
-grep -qE 'pub fn handle_palette_key\b' crates/scriptui-tui/src/palette.rs && grep -qE 'pub fn confirm_dirty_action\b' crates/scriptui-core/src/editor.rs
-
-[MUTATION_SPEC]
-1. crates/scriptui-tui/src/lib.rs — add `pub mod modals;` and `pub use modals::{centered_rect, handle_confirm_modal_key, handle_file_prompt_key, handle_spell_quick_fix_key, render_confirm_modal, render_file_prompt, render_spell_quick_fix};`.
-2. crates/scriptui-tui/src/modals.rs (NEW) — implement:
-   - `pub fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect`: returns a centered `Rect` clamped inside `area`.
-   - `pub fn render_spell_quick_fix(frame: &mut Frame, area: Rect, state: &EditorState)`:
-     - When `let Some(popup) = &state.spell_popup`, renders a `Clear` + bordered modal (`" Spellcheck: <word> "`) listing each suggestion in `popup.suggestions`, followed by `"Add '<word>' to Personal Dictionary"` and `"Ignore '<word>' (Session)"`, highlighting `popup.selected_index` with `accent`/`background` (bold).
-   - `pub fn handle_spell_quick_fix_key(key: KeyEvent, state: &mut EditorState) -> ScriptuiResult<bool>`:
-     - Returns `Ok(false)` if `state.overlay != OverlayMode::SpellQuickFix`.
-     - `Esc` → clears `spell_popup = None`, `overlay = OverlayMode::None`, returns `Ok(true)`.
-     - `Up` / `Down` → moves `popup.selected_index` across `0..(suggestions.len() + 2)`, returns `Ok(true)`.
-     - `Enter` → if `selected_index < suggestions.len()` calls `state.apply_selected_spell_fix()?`; else if `selected_index == suggestions.len()` calls `state.add_spell_popup_word_to_personal_dict()`; else calls `state.ignore_spell_popup_word()`; returns `Ok(true)`.
-   - `pub fn render_confirm_modal(frame: &mut Frame, area: Rect, state: &EditorState)`:
-     - Renders `Clear` + bordered modal for `OverlayMode::ConfirmQuit` (`" Unsaved Changes — Quit? "` / `"Discard unsaved changes and quit? [Y]es / [N]o"`) or `OverlayMode::ConfirmCloseBuffer` (`" Unsaved Changes — Close Buffer? "` / `"Discard unsaved changes and close? [Y]es / [N]o"`).
-   - `pub fn handle_confirm_modal_key(key: KeyEvent, state: &mut EditorState) -> bool`:
-     - Returns `false` if `state.overlay` is neither `ConfirmQuit` nor `ConfirmCloseBuffer`.
-     - `Char('y') | Char('Y') | Enter` → `state.confirm_dirty_action(true)`, returns `true`.
-     - `Char('n') | Char('N') | Esc` → `state.confirm_dirty_action(false)`, returns `true`.
-   - `pub fn render_file_prompt(frame: &mut Frame, area: Rect, state: &EditorState)`:
-     - Renders `Clear` + 3-row centered bordered modal titled `" Open File "` (`OpenFilePrompt`) or `" Save As "` (`SaveAsPrompt`) showing `state.file_prompt_input`.
-   - `pub fn handle_file_prompt_key(key: KeyEvent, state: &mut EditorState) -> ScriptuiResult<bool>`:
-     - Returns `Ok(false)` if `state.overlay` is neither `OpenFilePrompt` nor `SaveAsPrompt`.
-     - `Esc` → sets `overlay = OverlayMode::None`, returns `Ok(true)`.
-     - `Backspace` → pops char from `state.file_prompt_input`, returns `Ok(true)`.
-     - `Char(c)` (without `CONTROL | ALT`) → pushes `c` to `state.file_prompt_input`, returns `Ok(true)`.
-     - `Enter` → trims `state.file_prompt_input`; if non-empty:
-       - `OpenFilePrompt` → `state.buffers.open_file(&PathBuf::from(&path))?`, clears `find_replace.matches` & `active_match`, sets `status_message`, closes overlay;
-       - `SaveAsPrompt` → `state.buffers.active_mut().document.save_as(&PathBuf::from(&path))?`, sets `status_message`, closes overlay;
-       - returns `Ok(true)`.
-3. Tests in `crates/scriptui-tui/src/modals.rs` (`#[cfg(test)] mod tests`):
-   - `spell_popup_confirm_modal_and_save_as_prompt_roundtrip`:
-     - Opens `SpellQuickFix` on `"hello wrld"`, renders on `TestBackend::new(70, 16)`, asserts `"Add 'wrld' to Personal Dictionary"` appears, selects `"Ignore"` and verifies `"wrld"` is no longer flagged.
-     - Marks buffer dirty, triggers `Action::Quit` → `ConfirmQuit`, renders modal, sends `'y'` and asserts `state.should_quit == true`.
-     - Opens `SaveAsPrompt`, types a temp file path, sends `Enter`, and asserts the file exists on disk with expected contents.
-
-[POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn render_spell_quick_fix\b' crates/scriptui-tui/src/modals.rs && grep -qE 'pub fn handle_file_prompt_key\b' crates/scriptui-tui/src/modals.rs
-
-[HALT_INVARIANT]
-Halt immediately after POST_GATE exits 0 and report verification status.
-```
-
----
-
-### STEP 5G: Full Overlay, Styled Preview & Preview-Scroll Integration in `TuiApp` and `MouseRouter`
-
-* **Recommended Command:** `/goal`
-
-```text
-[STEP_ID]
-STEP 5G: Wire styled GFM PreviewPane, Find/Replace bar, Command Palette, Spellcheck popup, File/Confirm modals, and preview-region mouse wheel scrolling into TuiApp and MouseRouter in crates/scriptui-tui.
-
-[SCOPE_LOCK]
-ALLOWED_FILES:
-  - crates/scriptui-tui/src/app.rs
-  - crates/scriptui-tui/src/mouse.rs
-READ_ONLY_REFS:
-  - crates/scriptui-tui/src/preview_pane.rs:1-80 (PreviewPaneState, render_preview_pane)
-  - crates/scriptui-tui/src/find_bar.rs:1-90 (FindBarState, render_find_bar, handle_find_bar_key)
-  - crates/scriptui-tui/src/palette.rs:1-110 (discover_installed_locales, build_palette_entries, render_command_palette, handle_palette_key)
-  - crates/scriptui-tui/src/modals.rs:1-120 (render_spell_quick_fix, handle_spell_quick_fix_key, render_confirm_modal, handle_confirm_modal_key, render_file_prompt, handle_file_prompt_key)
-  - crates/scriptui-tui/src/mouse.rs:13-26, 154-175 (MouseContext, MouseRouter, ScrollUp/ScrollDown)
-FORBIDDEN_SCOPE:
-  - Any file not listed in ALLOWED_FILES.
-  - No .unwrap() or .expect() in non-test code.
-
-[PRE_GATE]
-grep -qE 'pub fn render_spell_quick_fix\b' crates/scriptui-tui/src/modals.rs && grep -qE 'pub fn render_preview_pane\b' crates/scriptui-tui/src/preview_pane.rs
-
-[MUTATION_SPEC]
-1. crates/scriptui-tui/src/mouse.rs:
-   - Add `pub fn is_over_preview(regions: ScreenRegions, col: u16, row: u16) -> bool` checking `regions.preview.is_some_and(|r| rect_contains(r, col, row))`.
-   - In `MouseRouter::handle_mouse`: keep editor scroll handling on `ScrollUp`/`ScrollDown` when NOT over preview (caller `TuiApp::handle_mouse_event` checks `is_over_preview` first to scroll `preview_pane` independently).
-2. crates/scriptui-tui/src/app.rs:
-   - Add fields to `TuiApp`:
-     - `pub preview_pane: PreviewPaneState`
-     - `pub find_bar: FindBarState`
-   - Initialize both with `Default::default()` in `TuiApp::from_cli`.
-   - In `render_frame`:
-     - Determine `editor_top_source_line`: if `wrapped_layout` is `Some(wl)`, use `wl.visual_lines.get(self.state.buffers.active().scroll_line).map_or(0, |vl| vl.logical_line)`; else `self.state.buffers.active().scroll_line`.
-     - Replace the Phase 4 plain-text preview block with `render_preview_pane(frame, preview_rect, &self.state, &mut self.preview_pane, editor_top_source_line)`.
-     - If `let Some(find_rect) = regions.find_bar`: call `render_find_bar(frame, find_rect, &self.state, self.find_bar)`.
-     - After `render_status_bar`, render the active floating modal based on `self.state.overlay`:
-       - `OverlayMode::CommandPalette` → build entries with `discover_installed_locales` on `[AppConfig::default_config_dir().join("dicts")]` and call `render_command_palette(...)`,
-       - `OverlayMode::SpellQuickFix` → `render_spell_quick_fix(...)`,
-       - `OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer` → `render_confirm_modal(...)`,
-       - `OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt` → `render_file_prompt(...)`,
-       - other variants → no floating modal.
-   - In `handle_key_event`:
-     - After ignoring non-`Press` events, dispatch to the active overlay handler first:
-       - `OverlayMode::Find | OverlayMode::Replace` → if `handle_find_bar_key(key, &mut self.state, &mut self.find_bar)?` returns `true`, return `Ok(())`.
-       - `OverlayMode::CommandPalette` → build entries + theme/dict dirs, if `handle_palette_key(...)?` returns `true`, return `Ok(())`.
-       - `OverlayMode::SpellQuickFix` → if `handle_spell_quick_fix_key(key, &mut self.state)?` returns `true`, return `Ok(())`.
-       - `OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer` → if `handle_confirm_modal_key(key, &mut self.state)` returns `true`, return `Ok(())`.
-       - `OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt` → if `handle_file_prompt_key(key, &mut self.state)?` returns `true`, return `Ok(())`.
-     - Otherwise run the existing keymap/typing dispatch (and re-enable `self.preview_pane.sync_enabled = true` on `Action::TogglePreview` / `Action::ExpandPreview`).
-   - In `handle_mouse_event`:
-     - If `mouse.kind` is `ScrollUp` or `ScrollDown` and `is_over_preview(frame.regions, mouse.column, mouse.row)`:
-       - Set `self.preview_pane.sync_enabled = false`, adjust `self.preview_pane.scroll_line` by 3 lines (clamped to `0..=self.preview_pane.total_lines.saturating_sub(1)`), and return `Ok(true)`.
-3. End-to-end `TestBackend` tests in `crates/scriptui-tui/src/app.rs`:
-   - `tui_app_overlays_and_styled_preview_integration`:
-     - Opens split preview (`Ctrl+Shift+P` / `Action::TogglePreview`) on `"# Heading\n\n- [x] Done\n\nfoo bar foo"`, renders, and asserts styled preview title `"Preview [SYNC]"` and `"Heading"` appear.
-     - Sends `Ctrl+P`, types `"ice_cyan"`, sends `Enter`, and asserts `app.state.theme.name == "ice_cyan"`.
-     - Sends `Ctrl+F`, types `"foo"`, renders, asserts `"1/2"` appears in find bar, sends `Alt+Enter`, and asserts 2 multi-cursor selections exist and overlay is `OverlayMode::None`.
-     - Sends `Ctrl+Q` on dirty buffer, asserts `OverlayMode::ConfirmQuit`, renders modal, sends `'y'`, and asserts `app.state.should_quit == true`.
-
-[POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'render_preview_pane' crates/scriptui-tui/src/app.rs && grep -qE 'handle_palette_key' crates/scriptui-tui/src/app.rs
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && test -f README.md && grep -qE 'crt_amber' README.md && grep -qE 'Ctrl\+Shift\+P' README.md
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

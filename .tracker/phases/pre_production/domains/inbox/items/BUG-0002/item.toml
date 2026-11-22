@@ -2,11 +2,11 @@
 id = "BUG-0002"
 type = "bug"
 title = "EditorState::handle_indent does not shift selection offsets and includes trailing col-0 line"
-status = "open"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T04:19:30Z"
-updated_at = "2026-11-22T04:19:30Z"
+updated_at = "2026-11-22T05:47:37Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "e9d0ac6"
+summary = "Fixed handle_indent shift_offset clamping when caret lies strictly inside deleted leading whitespace (STEP 5A, regression test dedent_inside_leading_whitespace_clamps_caret_to_line_start)."
