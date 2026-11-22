@@ -4,6 +4,7 @@ pub mod error;
 pub mod highlight;
 pub mod history;
 pub mod indent;
+pub mod keymap;
 pub mod markdown;
 pub mod preview;
 pub mod search;
@@ -22,6 +23,7 @@ pub use history::{EditTransaction, UndoStack};
 pub use indent::{
     compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentConfig, IndentStyle,
 };
+pub use keymap::{Action, KeyChord, KeyCode, KeyModifiers, Keymap};
 pub use markdown::{parse_gfm, CodeBlockRegion, GfmDocument, MdSpan, MdTokenKind};
 pub use preview::{build_preview, PreviewDocument, PreviewLine};
 pub use search::{
