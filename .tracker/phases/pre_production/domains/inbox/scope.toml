@@ -171,7 +171,7 @@ created_at = "2026-11-22T04:23:24Z"
 [[items.tasks]]
 id = "TASK-0021"
 title = "tui"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T04:23:24Z"
 
@@ -188,3 +188,10 @@ title = "tui"
 status = "open"
 severity = "medium"
 created_at = "2026-11-22T04:23:24Z"
+
+[[items.tasks]]
+id = "TASK-0024"
+title = "Resolve clippy::too_many_arguments on ensure_cursor_visible in STEP 4E"
+status = "pending"
+severity = "high"
+created_at = "2026-11-22T04:36:51Z"
