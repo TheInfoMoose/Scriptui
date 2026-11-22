@@ -8,12 +8,13 @@ status = "open"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T15:13:06Z"
-updated_at = "2026-11-22T17:58:32Z"
+updated_at = "2026-11-22T21:58:20Z"
 source_ref = "STEP 8A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 258
 iteration_count = 1
+last_timer_session = "TASK-0042@2026-11-22T17:39:52Z"
 
 [history]
 recurrence_count = 0
