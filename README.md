@@ -11,6 +11,23 @@ ScripTUI is organized as a two-crate Cargo workspace:
 | `crates/scriptui-core` | Headless editor engine (no TUI toolkit imports) | Ropey rope buffer (`DocumentBuffer`), multi-buffer manager, transactional undo/redo, multi-cursor selections, Unicode display-width & tab-stop soft wrapping, regex/literal find & replace, GFM syntax highlighting & live styled preview, embedded Hunspell `en_US` spellcheck, TOML themes & config, and CUA keymap. |
 | `crates/scriptui-tui` | Ratatui + Crossterm TUI frontend (`scriptui` binary) | CLI parsing (`clap`), raw-mode `TerminalGuard` with bracketed paste and OSC 52 clipboard support, tab bar, line-number gutter & editor viewport, split/full Markdown preview pane, inline find/replace bar, command palette, spellcheck quick-fix & file/confirmation modals, and mouse routing. |
 
+## Installation
+
+Building and installing ScripTUI from source requires a Rust stable toolchain (installed via [rustup](https://rustup.rs/)).
+
+```bash
+cargo install --path crates/scriptui-tui --locked
+```
+
+This installs the `scriptui` binary into `~/.cargo/bin`. Verify the installation:
+
+```bash
+scriptui --version
+# scriptui 0.1.0
+```
+
+Prebuilt binaries for Linux x86_64 (`x86_64-unknown-linux-gnu`) and macOS Apple Silicon (`aarch64-apple-darwin`) are planned for future GitHub releases and are not yet available.
+
 ## Quick Start
 
 ### Build & Run
@@ -191,3 +208,11 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+## Releases
+
+ScripTUI follows [Semantic Versioning](https://semver.org/). Release builds use the workspace's tuned `[profile.release]` configuration (link-time optimization, a single codegen unit, and stripped symbols). Notable changes for each version are recorded in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+ScripTUI is licensed under the MIT License. See [LICENSE](LICENSE) for details.
