@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0012"
 type = "task"
 title = "keymap"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-22T03:29:58Z"
-updated_at = "2026-11-22T03:29:58Z"
+updated_at = "2026-11-22T03:35:02Z"
 source_ref = "STEP 3A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0012@2026-11-22T03:33:03Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-22"
+commit = "981129a"
+summary = "STEP 3A: Data-Driven Keymap and Modeless CUA Action Enum (phased check PASS)"
