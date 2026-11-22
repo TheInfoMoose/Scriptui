@@ -140,7 +140,7 @@ grep -qE '^version = "0\.1\.0"' Cargo.toml && grep -qE '^license = "MIT"' Cargo.
      - `categories.workspace = true`
 
 [POST_GATE]
-cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo build --release && ./target/release/scriptui --version | grep -qE '^scriptui 0\.1\.0$' && test -f LICENSE
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo build --release && "${CARGO_TARGET_DIR:-target}/release/scriptui" --version | grep -qE '^scriptui 0\.1\.0$' && test -f LICENSE
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
