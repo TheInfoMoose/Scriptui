@@ -1,3 +1,4 @@
+pub mod app;
 pub mod chrome;
 pub mod cli;
 pub mod layout_tree;
@@ -5,6 +6,7 @@ pub mod mouse;
 pub mod terminal;
 pub mod viewport;
 
+pub use app::{FrameState, TuiApp};
 pub use chrome::{
     render_preview_edge_tab, render_split_divider, render_status_bar, render_tab_bar, TabHitbox,
 };

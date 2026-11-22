@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description.workspace = true
 
+[[bin]]
+name = "scriptui"
+path = "src/main.rs"
+
 [dependencies]
 scriptui-core = { path = "../scriptui-core" }
 ratatui = "0.29"
