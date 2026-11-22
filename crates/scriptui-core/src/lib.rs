@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod config;
 pub mod error;
+pub mod highlight;
 pub mod history;
 pub mod indent;
 pub mod markdown;
@@ -11,6 +12,10 @@ pub mod theme;
 pub use buffer::{BufferEdit, DocumentBuffer};
 pub use config::AppConfig;
 pub use error::{ScriptuiError, ScriptuiResult};
+pub use highlight::{
+    highlight_editor_line, style_for_md_token, CodeHighlighter, LineOverlay, StyleFlags,
+    StyledSegment,
+};
 pub use history::{EditTransaction, UndoStack};
 pub use indent::{
     compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentConfig, IndentStyle,
