@@ -32,7 +32,7 @@ created_at = "2026-11-22T00:11:26Z"
 [[items.tasks]]
 id = "TASK-0004"
 title = "indent"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T00:11:26Z"
 
