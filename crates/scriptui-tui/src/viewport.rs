@@ -4,8 +4,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::Frame;
 use scriptui_core::{
-    compute_wrapped_layout, highlight_editor_line, parse_gfm, DocumentBuffer, EditorState,
-    IndentStyle, LineOverlay, WrappedLayout,
+    compute_wrapped_layout, highlight_editor_line, DocumentBuffer, EditorState, IndentStyle,
+    LineOverlay, WrappedLayout,
 };
 
 use crate::layout_tree::{rgb_to_color, segment_to_style};
@@ -163,17 +163,14 @@ pub fn render_editor_viewport(
         return (metrics, layout);
     }
 
+    let (gfm_doc, spell_diagnostics) = {
+        let (g, s) = state.active_analysis();
+        (g.clone(), s.to_vec())
+    };
+
     let active = state.buffers.active();
     let scroll_line = active.scroll_line;
     let h_scroll = if soft_wrap { 0 } else { active.scroll_col };
-
-    let text = active.document.text();
-    let gfm_doc = parse_gfm(&text);
-    let spell_diagnostics = state
-        .spell_engine
-        .as_ref()
-        .map(|engine| engine.check_document(&text, &gfm_doc.spell_skip_byte_ranges))
-        .unwrap_or_default();
 
     let palette = &state.theme.palette;
     let bg_color = rgb_to_color(palette.background);

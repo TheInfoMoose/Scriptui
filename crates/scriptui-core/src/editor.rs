@@ -6,7 +6,7 @@ use crate::error::{ScriptuiError, ScriptuiResult};
 use crate::history::EditTransaction;
 use crate::indent::{compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentStyle};
 use crate::keymap::{Action, Keymap};
-use crate::markdown::parse_gfm;
+use crate::markdown::{parse_gfm, GfmDocument};
 use crate::preview::{build_preview, PreviewDocument};
 use crate::search::{
     find_all, next_match, prev_match, select_all_occurrences, SearchMatch, SearchQuery,
@@ -212,6 +212,15 @@ pub struct SpellQuickFixState {
     pub selected_index: usize,
 }
 
+#[derive(Debug, Clone)]
+struct AnalysisCache {
+    buffer_index: usize,
+    doc_revision: u64,
+    spell_revision: u64,
+    gfm: GfmDocument,
+    spell_diagnostics: Vec<SpellDiagnostic>,
+}
+
 pub struct EditorState {
     pub config: AppConfig,
     pub theme: Theme,
@@ -226,6 +235,9 @@ pub struct EditorState {
     pub file_prompt_input: String,
     pub status_message: Option<String>,
     pub should_quit: bool,
+    spell_revision: u64,
+    analysis_cache: Option<AnalysisCache>,
+    analysis_recomputes: u64,
 }
 
 impl EditorState {
@@ -254,7 +266,50 @@ impl EditorState {
             file_prompt_input: String::new(),
             status_message: None,
             should_quit: false,
+            spell_revision: 0,
+            analysis_cache: None,
+            analysis_recomputes: 0,
         })
+    }
+
+    pub fn active_analysis(&mut self) -> (&GfmDocument, &[SpellDiagnostic]) {
+        let buffer_index = self.buffers.active_index();
+        let doc_revision = self.buffers.active().document.revision();
+        let spell_revision = self.spell_revision;
+
+        let is_fresh = self.analysis_cache.as_ref().is_some_and(|cache| {
+            cache.buffer_index == buffer_index
+                && cache.doc_revision == doc_revision
+                && cache.spell_revision == spell_revision
+        });
+
+        if !is_fresh {
+            self.analysis_cache = None;
+        }
+
+        let cache = self.analysis_cache.get_or_insert_with(|| {
+            let text = self.buffers.active().document.text();
+            let gfm = parse_gfm(&text);
+            let spell_diagnostics = self
+                .spell_engine
+                .as_ref()
+                .map(|e| e.check_document(&text, &gfm.spell_skip_byte_ranges))
+                .unwrap_or_default();
+            self.analysis_recomputes += 1;
+            AnalysisCache {
+                buffer_index,
+                doc_revision,
+                spell_revision,
+                gfm,
+                spell_diagnostics,
+            }
+        });
+
+        (&cache.gfm, &cache.spell_diagnostics)
+    }
+
+    pub fn analysis_recompute_count(&self) -> u64 {
+        self.analysis_recomputes
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -278,21 +333,25 @@ impl EditorState {
     }
 
     pub fn open_spell_quick_fix_at_cursor(&mut self) -> bool {
-        let Some(engine) = &self.spell_engine else {
+        if self.spell_engine.is_none() {
             return false;
+        }
+
+        let pos = {
+            let doc_buf = &self.buffers.active().document;
+            doc_buf.char_to_position(doc_buf.selection().primary().head)
+        };
+        let found = {
+            let (_, diagnostics) = self.active_analysis();
+            diagnostics
+                .iter()
+                .find(|diag| {
+                    diag.line == pos.line && pos.col >= diag.col_start && pos.col <= diag.col_end
+                })
+                .cloned()
         };
 
-        let doc_buf = &self.buffers.active().document;
-        let text = doc_buf.text();
-        let pos = doc_buf.char_to_position(doc_buf.selection().primary().head);
-        let gfm = parse_gfm(&text);
-        let diagnostics = engine.check_document(&text, &gfm.spell_skip_byte_ranges);
-
-        let found = diagnostics.into_iter().find(|diag| {
-            diag.line == pos.line && pos.col >= diag.col_start && pos.col <= diag.col_end
-        });
-
-        if let Some(diag) = found {
+        if let (Some(diag), Some(engine)) = (found, &self.spell_engine) {
             let suggestions = engine.suggest(&diag.word, 5);
             self.spell_popup = Some(SpellQuickFixState {
                 diagnostic: diag,
@@ -357,6 +416,7 @@ impl EditorState {
         let engine = SpellEngine::load_locale(locale, search_dirs)?;
         self.spell_engine = Some(engine);
         self.config.spell_locale = locale.to_string();
+        self.spell_revision = self.spell_revision.wrapping_add(1);
         Ok(())
     }
 
@@ -367,6 +427,7 @@ impl EditorState {
         engine.personal_mut().add(&popup.diagnostic.word);
         self.spell_popup = None;
         self.overlay = OverlayMode::None;
+        self.spell_revision = self.spell_revision.wrapping_add(1);
         true
     }
 
@@ -377,6 +438,7 @@ impl EditorState {
         engine.ignore_word(&popup.diagnostic.word);
         self.spell_popup = None;
         self.overlay = OverlayMode::None;
+        self.spell_revision = self.spell_revision.wrapping_add(1);
         true
     }
 
@@ -473,6 +535,7 @@ impl EditorState {
                 let _ = self.buffers.close_active(true);
                 self.find_replace.matches.clear();
                 self.find_replace.active_match = None;
+                self.analysis_cache = None;
                 self.overlay = OverlayMode::None;
             }
             _ => {}
@@ -506,11 +569,13 @@ impl EditorState {
                 self.buffers.new_buffer();
                 self.find_replace.matches.clear();
                 self.find_replace.active_match = None;
+                self.analysis_cache = None;
             }
             Action::CloseBuffer => match self.buffers.close_active(false) {
                 CloseResult::Closed => {
                     self.find_replace.matches.clear();
                     self.find_replace.active_match = None;
+                    self.analysis_cache = None;
                 }
                 CloseResult::NeedsConfirmation => {
                     self.overlay = OverlayMode::ConfirmCloseBuffer;
@@ -520,11 +585,13 @@ impl EditorState {
                 self.buffers.next_buffer();
                 self.find_replace.matches.clear();
                 self.find_replace.active_match = None;
+                self.analysis_cache = None;
             }
             Action::PrevBuffer => {
                 self.buffers.prev_buffer();
                 self.find_replace.matches.clear();
                 self.find_replace.active_match = None;
+                self.analysis_cache = None;
             }
             Action::Quit => {
                 if self.buffers.has_dirty_buffers() {
@@ -1204,5 +1271,41 @@ mod tests {
             editor.find_replace.matches[2],
             SearchMatch { start: 22, end: 25 }
         );
+    }
+
+    #[test]
+    fn active_analysis_caches_across_unchanged_revisions_and_invalidates_on_edit_or_spell_change() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("hello wrld");
+
+        let (_, diags_first) = editor.active_analysis();
+        assert_eq!(diags_first.len(), 1);
+        assert_eq!(editor.analysis_recompute_count(), 1);
+
+        let (_, diags_second) = editor.active_analysis();
+        assert_eq!(diags_second.len(), 1);
+        assert_eq!(editor.analysis_recompute_count(), 1);
+
+        editor.insert_text(" more");
+        let _ = editor.active_analysis();
+        assert_eq!(editor.analysis_recompute_count(), 2);
+
+        let caret = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 7 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(caret));
+        assert!(editor.open_spell_quick_fix_at_cursor());
+        assert_eq!(editor.analysis_recompute_count(), 2);
+
+        assert!(editor.ignore_spell_popup_word());
+        let (_, diags_after_ignore) = editor.active_analysis();
+        assert!(diags_after_ignore.is_empty());
+        assert_eq!(editor.analysis_recompute_count(), 3);
     }
 }
