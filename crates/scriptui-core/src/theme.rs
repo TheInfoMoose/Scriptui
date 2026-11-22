@@ -304,6 +304,14 @@ pub fn load_theme_file(path: &Path) -> ScriptuiResult<Theme> {
 }
 
 pub fn resolve_theme(name: &str, search_dirs: &[PathBuf]) -> ScriptuiResult<Theme> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(ScriptuiError::UnknownTheme(name.to_string()));
+    }
+
     for dir in search_dirs {
         let candidate = dir.join(format!("{name}.toml"));
         if candidate.is_file() {
@@ -370,5 +378,24 @@ mod tests {
                 b: 56
             }
         );
+    }
+
+    #[test]
+    fn resolve_theme_rejects_path_traversal() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("themes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(root.path().join("secret.toml"), DEFAULT_CRT_AMBER_TOML).unwrap();
+
+        let err = resolve_theme("../secret", std::slice::from_ref(&dir)).unwrap_err();
+        assert!(matches!(err, ScriptuiError::UnknownTheme(name) if name == "../secret"));
+
+        for invalid in ["", ".", "..", "sub/theme", r"sub\theme", "theme.toml"] {
+            let err = resolve_theme(invalid, std::slice::from_ref(&dir)).unwrap_err();
+            assert!(
+                matches!(err, ScriptuiError::UnknownTheme(_)),
+                "expected UnknownTheme for {invalid:?}"
+            );
+        }
     }
 }
