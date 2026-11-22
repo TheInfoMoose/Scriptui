@@ -32,7 +32,10 @@ pub use indent::{
     compute_enter_indent, dedent_lines, indent_lines, EnterOutcome, IndentConfig, IndentStyle,
 };
 pub use keymap::{Action, KeyChord, KeyCode, KeyModifiers, Keymap};
-pub use layout::{compute_indent_guides, compute_wrapped_layout, VisualLine, WrappedLayout};
+pub use layout::{
+    char_display_width, compute_indent_guides, compute_wrapped_layout, display_col_to_logical_col,
+    line_display_width, logical_col_to_display_col, VisualLine, WrappedLayout,
+};
 pub use markdown::{parse_gfm, CodeBlockRegion, GfmDocument, MdSpan, MdTokenKind};
 pub use preview::{build_preview, PreviewDocument, PreviewLine};
 pub use search::{

@@ -63,6 +63,66 @@ impl WrappedLayout {
             col: vl.char_start.saturating_add(visual_col).min(vl.char_end),
         }
     }
+
+    pub fn logical_to_visual_cells(
+        &self,
+        buf: &DocumentBuffer,
+        pos: Position,
+        tab_width: usize,
+    ) -> (usize, usize) {
+        let mut last_for_line: Option<(usize, &VisualLine)> = None;
+        for (visual_row, vl) in self.visual_lines.iter().enumerate() {
+            if vl.logical_line == pos.line {
+                if pos.col >= vl.char_start && pos.col < vl.char_end {
+                    let line = buf.line_text(vl.logical_line).unwrap_or_default();
+                    return (
+                        visual_row,
+                        logical_col_to_display_col(&line, vl.char_start, pos.col, tab_width),
+                    );
+                }
+                last_for_line = Some((visual_row, vl));
+            }
+        }
+
+        if let Some((visual_row, vl)) = last_for_line {
+            let clamped_col = pos.col.min(vl.char_end);
+            let line = buf.line_text(vl.logical_line).unwrap_or_default();
+            return (
+                visual_row,
+                logical_col_to_display_col(&line, vl.char_start, clamped_col, tab_width),
+            );
+        }
+
+        match self.visual_lines.last() {
+            Some(last) => {
+                let line = buf.line_text(last.logical_line).unwrap_or_default();
+                (
+                    self.visual_lines.len() - 1,
+                    logical_col_to_display_col(&line, last.char_start, last.char_end, tab_width),
+                )
+            }
+            None => (0, 0),
+        }
+    }
+
+    pub fn visual_cells_to_logical(
+        &self,
+        buf: &DocumentBuffer,
+        visual_row: usize,
+        cell_col: usize,
+        tab_width: usize,
+    ) -> Position {
+        if self.visual_lines.is_empty() {
+            return Position { line: 0, col: 0 };
+        }
+        let row = visual_row.min(self.visual_lines.len() - 1);
+        let vl = &self.visual_lines[row];
+        let line = buf.line_text(vl.logical_line).unwrap_or_default();
+        Position {
+            line: vl.logical_line,
+            col: display_col_to_logical_col(&line, vl.char_start, vl.char_end, cell_col, tab_width),
+        }
+    }
 }
 
 pub fn compute_indent_guides(line: &str, tab_width: usize) -> Vec<usize> {
@@ -94,6 +154,46 @@ pub fn line_display_width(line: &str, tab_width: usize) -> usize {
         col += char_display_width(ch, col, tab_width);
     }
     col
+}
+
+pub fn logical_col_to_display_col(
+    line: &str,
+    char_start: usize,
+    logical_col: usize,
+    tab_width: usize,
+) -> usize {
+    let mut col = 0usize;
+    for ch in line
+        .chars()
+        .skip(char_start)
+        .take(logical_col.saturating_sub(char_start))
+    {
+        col += char_display_width(ch, col, tab_width);
+    }
+    col
+}
+
+pub fn display_col_to_logical_col(
+    line: &str,
+    char_start: usize,
+    char_end: usize,
+    target_cell_col: usize,
+    tab_width: usize,
+) -> usize {
+    let mut cell_col = 0usize;
+    for (offset, ch) in line
+        .chars()
+        .skip(char_start)
+        .take(char_end.saturating_sub(char_start))
+        .enumerate()
+    {
+        let w = char_display_width(ch, cell_col, tab_width);
+        if target_cell_col < cell_col + w {
+            return char_start + offset;
+        }
+        cell_col += w;
+    }
+    char_end
 }
 
 pub fn compute_wrapped_layout(
@@ -297,6 +397,94 @@ mod tests {
                 narrow_layout.visual_lines[0].char_end
             ),
             (0, 1)
+        );
+    }
+
+    #[test]
+    fn display_cell_mapping_handles_tabs_and_cjk_wide_chars() {
+        let tab_buf = DocumentBuffer::from_str_content("\tabc");
+        let tab_layout = compute_wrapped_layout(&tab_buf, 20, true, 4);
+        assert_eq!(
+            tab_layout.logical_to_visual_cells(&tab_buf, Position { line: 0, col: 0 }, 4),
+            (0, 0)
+        );
+        assert_eq!(
+            tab_layout.logical_to_visual_cells(&tab_buf, Position { line: 0, col: 1 }, 4),
+            (0, 4)
+        );
+        assert_eq!(
+            tab_layout.logical_to_visual_cells(&tab_buf, Position { line: 0, col: 2 }, 4),
+            (0, 5)
+        );
+        for cell in 0..=3 {
+            assert_eq!(
+                tab_layout.visual_cells_to_logical(&tab_buf, 0, cell, 4),
+                Position { line: 0, col: 0 }
+            );
+        }
+        assert_eq!(
+            tab_layout.visual_cells_to_logical(&tab_buf, 0, 4, 4),
+            Position { line: 0, col: 1 }
+        );
+        assert_eq!(
+            tab_layout.visual_cells_to_logical(&tab_buf, 0, 5, 4),
+            Position { line: 0, col: 2 }
+        );
+        assert_eq!(
+            tab_layout.visual_cells_to_logical(&tab_buf, 0, 99, 4),
+            Position { line: 0, col: 4 }
+        );
+
+        let cjk_buf = DocumentBuffer::from_str_content("日本語a");
+        let cjk_layout = compute_wrapped_layout(&cjk_buf, 20, true, 4);
+        assert_eq!(
+            cjk_layout.logical_to_visual_cells(&cjk_buf, Position { line: 0, col: 0 }, 4),
+            (0, 0)
+        );
+        assert_eq!(
+            cjk_layout.logical_to_visual_cells(&cjk_buf, Position { line: 0, col: 1 }, 4),
+            (0, 2)
+        );
+        assert_eq!(
+            cjk_layout.logical_to_visual_cells(&cjk_buf, Position { line: 0, col: 2 }, 4),
+            (0, 4)
+        );
+        assert_eq!(
+            cjk_layout.logical_to_visual_cells(&cjk_buf, Position { line: 0, col: 3 }, 4),
+            (0, 6)
+        );
+        for cell in [0, 1] {
+            assert_eq!(
+                cjk_layout.visual_cells_to_logical(&cjk_buf, 0, cell, 4),
+                Position { line: 0, col: 0 }
+            );
+        }
+        for cell in [2, 3] {
+            assert_eq!(
+                cjk_layout.visual_cells_to_logical(&cjk_buf, 0, cell, 4),
+                Position { line: 0, col: 1 }
+            );
+        }
+        for cell in [4, 5] {
+            assert_eq!(
+                cjk_layout.visual_cells_to_logical(&cjk_buf, 0, cell, 4),
+                Position { line: 0, col: 2 }
+            );
+        }
+        assert_eq!(
+            cjk_layout.visual_cells_to_logical(&cjk_buf, 0, 6, 4),
+            Position { line: 0, col: 3 }
+        );
+
+        let wrapped_buf = DocumentBuffer::from_str_content("日本語テスト");
+        let wrapped_layout = compute_wrapped_layout(&wrapped_buf, 6, true, 4);
+        assert_eq!(
+            wrapped_layout.logical_to_visual_cells(&wrapped_buf, Position { line: 0, col: 4 }, 4),
+            (1, 2)
+        );
+        assert_eq!(
+            wrapped_layout.visual_cells_to_logical(&wrapped_buf, 1, 2, 4),
+            Position { line: 0, col: 4 }
         );
     }
 }
