@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod buffers;
 pub mod config;
+pub mod editor;
 pub mod error;
 pub mod highlight;
 pub mod history;
@@ -17,6 +18,10 @@ pub mod theme;
 pub use buffer::{BufferEdit, DocumentBuffer};
 pub use buffers::{BufferId, BufferManager, CloseResult, ManagedBuffer};
 pub use config::AppConfig;
+pub use editor::{
+    CommandEntry, CommandPaletteState, EditorState, FindReplaceState, OverlayMode, PreviewMode,
+    SpellQuickFixState,
+};
 pub use error::{ScriptuiError, ScriptuiResult};
 pub use highlight::{
     highlight_editor_line, style_for_md_token, CodeHighlighter, LineOverlay, StyleFlags,
