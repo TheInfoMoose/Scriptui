@@ -16,7 +16,7 @@ use crate::chrome::{
     render_preview_edge_tab, render_split_divider, render_status_bar, render_tab_bar, TabHitbox,
 };
 use crate::cli::Cli;
-use crate::find_bar::{handle_find_bar_key, render_find_bar, FindBarState};
+use crate::find_bar::{handle_find_bar_key, render_find_bar, FindBarState, FindFocus};
 use crate::layout_tree::{compute_screen_regions, ScreenRegions};
 use crate::modals::{
     handle_confirm_modal_key, handle_file_prompt_key, handle_spell_quick_fix_key,
@@ -323,6 +323,60 @@ impl TuiApp {
         self.mouse.handle_mouse(mouse, &mut self.state, &ctx)
     }
 
+    pub fn handle_paste_event(&mut self, text: &str) -> ScriptuiResult<()> {
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let single_line = normalized.replace('\n', " ");
+
+        match self.state.overlay {
+            OverlayMode::None => {
+                self.state.insert_text(&normalized);
+                self.follow_cursor = true;
+            }
+            OverlayMode::Find => {
+                self.state.find_replace.query.pattern.push_str(&single_line);
+                match self.state.update_find_matches() {
+                    Ok(_) => {}
+                    Err(ScriptuiError::InvalidRegex { pattern, source }) => {
+                        self.state.find_replace.matches.clear();
+                        self.state.find_replace.active_match = None;
+                        self.state.status_message =
+                            Some(format!("Invalid regex '{pattern}': {source}"));
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+            OverlayMode::Replace => {
+                if self.find_bar.focus == FindFocus::Replacement {
+                    self.state.find_replace.replacement.push_str(&single_line);
+                } else {
+                    self.state.find_replace.query.pattern.push_str(&single_line);
+                    match self.state.update_find_matches() {
+                        Ok(_) => {}
+                        Err(ScriptuiError::InvalidRegex { pattern, source }) => {
+                            self.state.find_replace.matches.clear();
+                            self.state.find_replace.active_match = None;
+                            self.state.status_message =
+                                Some(format!("Invalid regex '{pattern}': {source}"));
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+            }
+            OverlayMode::CommandPalette => {
+                self.state.palette.query.push_str(&single_line);
+                self.state.palette.selected_index = 0;
+            }
+            OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt => {
+                self.state.file_prompt_input.push_str(&single_line);
+            }
+            OverlayMode::SpellQuickFix
+            | OverlayMode::ConfirmQuit
+            | OverlayMode::ConfirmCloseBuffer => {}
+        }
+
+        Ok(())
+    }
+
     pub fn run_event_loop(&mut self, guard: &mut TerminalGuard) -> io::Result<()> {
         let mut needs_redraw = true;
         while !self.state.should_quit {
@@ -342,6 +396,12 @@ impl TuiApp {
                     }
                     Event::Mouse(mouse) => {
                         if let Err(err) = self.handle_mouse_event(mouse) {
+                            self.state.status_message = Some(err.to_string());
+                        }
+                        needs_redraw = true;
+                    }
+                    Event::Paste(text) => {
+                        if let Err(err) = self.handle_paste_event(&text) {
                             self.state.status_message = Some(err.to_string());
                         }
                         needs_redraw = true;
@@ -710,5 +770,31 @@ mod tests {
             .draw(|frame| app.render_frame(frame))
             .expect("render_frame should succeed");
         assert_eq!(app.palette_entries.len(), cached_len);
+    }
+
+    #[test]
+    fn bracketed_paste_routes_to_editor_find_bar_and_ignores_confirm_modal() {
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+
+        app.handle_paste_event("line1\r\nline2")
+            .expect("paste in editor should succeed");
+        assert_eq!(app.state.buffers.active().document.text(), "line1\nline2");
+
+        app.state.overlay = OverlayMode::Find;
+        app.handle_paste_event("line2")
+            .expect("paste in find bar should succeed");
+        assert_eq!(app.state.find_replace.query.pattern, "line2");
+        assert_eq!(app.state.find_replace.matches.len(), 1);
+
+        app.state.overlay = OverlayMode::ConfirmQuit;
+        app.handle_paste_event("ignored")
+            .expect("paste in confirm modal should be ignored");
+        assert_eq!(app.state.buffers.active().document.text(), "line1\nline2");
     }
 }

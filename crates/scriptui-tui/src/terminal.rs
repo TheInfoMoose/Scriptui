@@ -3,8 +3,8 @@ use std::panic;
 
 use crossterm::cursor::Show;
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, KeyCode as CrosstermKeyCode, KeyEvent,
-    KeyModifiers as CrosstermKeyModifiers,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyCode as CrosstermKeyCode, KeyEvent, KeyModifiers as CrosstermKeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -30,7 +30,12 @@ impl TerminalGuard {
 
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        if let Err(err) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+        if let Err(err) = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        ) {
             restore_terminal_best_effort();
             return Err(err);
         }
@@ -64,6 +69,7 @@ fn restore_terminal_best_effort() {
         io::stdout(),
         LeaveAlternateScreen,
         DisableMouseCapture,
+        DisableBracketedPaste,
         Show
     );
 }
