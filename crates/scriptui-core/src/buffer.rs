@@ -1,12 +1,19 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use ropey::Rope;
 
 use crate::error::{ScriptuiError, ScriptuiResult};
 use crate::selection::{Position, Selection, SelectionSet};
+
+static NEXT_DOCUMENT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_document_id() -> u64 {
+    NEXT_DOCUMENT_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferEdit {
@@ -18,6 +25,7 @@ pub struct BufferEdit {
 
 #[derive(Debug, Clone)]
 pub struct DocumentBuffer {
+    doc_id: u64,
     rope: Rope,
     path: Option<PathBuf>,
     dirty: bool,
@@ -29,6 +37,7 @@ pub struct DocumentBuffer {
 impl DocumentBuffer {
     pub fn empty() -> Self {
         Self {
+            doc_id: next_document_id(),
             rope: Rope::new(),
             path: None,
             dirty: false,
@@ -40,6 +49,7 @@ impl DocumentBuffer {
 
     pub fn from_str_content(text: &str) -> Self {
         Self {
+            doc_id: next_document_id(),
             rope: Rope::from_str(text),
             path: None,
             dirty: false,
@@ -59,6 +69,7 @@ impl DocumentBuffer {
             .and_then(|meta| meta.modified().ok());
 
         Ok(Self {
+            doc_id: next_document_id(),
             rope: Rope::from_str(&content),
             path: Some(path.to_path_buf()),
             dirty: false,
@@ -157,6 +168,10 @@ impl DocumentBuffer {
 
     pub fn set_dirty(&mut self, dirty: bool) {
         self.dirty = dirty;
+    }
+
+    pub fn doc_id(&self) -> u64 {
+        self.doc_id
     }
 
     pub fn revision(&self) -> u64 {

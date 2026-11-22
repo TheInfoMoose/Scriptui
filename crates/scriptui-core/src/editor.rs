@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::buffers::{BufferManager, CloseResult};
 use crate::config::AppConfig;
@@ -214,6 +214,7 @@ pub struct SpellQuickFixState {
 
 #[derive(Debug, Clone)]
 struct AnalysisCache {
+    doc_id: u64,
     buffer_index: usize,
     doc_revision: u64,
     spell_revision: u64,
@@ -273,12 +274,14 @@ impl EditorState {
     }
 
     pub fn active_analysis(&mut self) -> (&GfmDocument, &[SpellDiagnostic]) {
+        let doc_id = self.buffers.active().document.doc_id();
         let buffer_index = self.buffers.active_index();
         let doc_revision = self.buffers.active().document.revision();
         let spell_revision = self.spell_revision;
 
         let is_fresh = self.analysis_cache.as_ref().is_some_and(|cache| {
-            cache.buffer_index == buffer_index
+            cache.doc_id == doc_id
+                && cache.buffer_index == buffer_index
                 && cache.doc_revision == doc_revision
                 && cache.spell_revision == spell_revision
         });
@@ -297,6 +300,7 @@ impl EditorState {
                 .unwrap_or_default();
             self.analysis_recomputes += 1;
             AnalysisCache {
+                doc_id,
                 buffer_index,
                 doc_revision,
                 spell_revision,
@@ -306,6 +310,18 @@ impl EditorState {
         });
 
         (&cache.gfm, &cache.spell_diagnostics)
+    }
+
+    pub fn invalidate_analysis_cache(&mut self) {
+        self.analysis_cache = None;
+    }
+
+    pub fn open_file(&mut self, path: &Path) -> ScriptuiResult<crate::buffers::BufferId> {
+        let id = self.buffers.open_file(path)?;
+        self.find_replace.matches.clear();
+        self.find_replace.active_match = None;
+        self.analysis_cache = None;
+        Ok(id)
     }
 
     pub fn analysis_recompute_count(&self) -> u64 {
@@ -1306,6 +1322,35 @@ mod tests {
         assert!(editor.ignore_spell_popup_word());
         let (_, diags_after_ignore) = editor.active_analysis();
         assert!(diags_after_ignore.is_empty());
+        assert_eq!(editor.analysis_recompute_count(), 3);
+    }
+
+    #[test]
+    fn active_analysis_recomputes_when_open_file_replaces_initial_empty_buffer() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+
+        let (_, initial_diags) = editor.active_analysis();
+        assert!(initial_diags.is_empty());
+        assert_eq!(editor.analysis_recompute_count(), 1);
+
+        let dir = tempfile::tempdir().unwrap();
+        let temp_path = dir.path().join("note.md");
+        std::fs::write(&temp_path, "# Heading\nhello wrld\n").unwrap();
+
+        editor.open_file(&temp_path).unwrap();
+        assert_eq!(editor.buffers.active_index(), 0);
+        assert_eq!(editor.buffers.active().document.revision(), 0);
+
+        let (gfm, diags_after_open) = editor.active_analysis();
+        assert!(!gfm.spans.is_empty());
+        assert!(diags_after_open.iter().any(|diag| diag.word == "wrld"));
+        assert_eq!(editor.analysis_recompute_count(), 2);
+
+        std::fs::write(&temp_path, "clean text\n").unwrap();
+        assert!(editor.buffers.reload_active_from_disk().unwrap());
+
+        let (_, diags_after_reload) = editor.active_analysis();
+        assert!(diags_after_reload.is_empty());
         assert_eq!(editor.analysis_recompute_count(), 3);
     }
 }

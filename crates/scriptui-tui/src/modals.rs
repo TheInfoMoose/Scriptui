@@ -287,9 +287,7 @@ pub fn handle_file_prompt_key(key: KeyEvent, state: &mut EditorState) -> Scriptu
             if !path.is_empty() {
                 match state.overlay {
                     OverlayMode::OpenFilePrompt => {
-                        state.buffers.open_file(&PathBuf::from(&path))?;
-                        state.find_replace.matches.clear();
-                        state.find_replace.active_match = None;
+                        state.open_file(&PathBuf::from(&path))?;
                         state.status_message = Some(format!("Opened {path}"));
                         state.overlay = OverlayMode::None;
                     }
