@@ -199,7 +199,7 @@ created_at = "2026-11-22T04:36:51Z"
 [[items.tasks]]
 id = "TASK-0025"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T05:12:38Z"
 
