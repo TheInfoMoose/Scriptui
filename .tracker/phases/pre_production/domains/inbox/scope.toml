@@ -84,3 +84,38 @@ title = "theme"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-22T00:54:35Z"
+
+[[items.tasks]]
+id = "TASK-0012"
+title = "keymap"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T03:29:58Z"
+
+[[items.tasks]]
+id = "TASK-0013"
+title = "buffers"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T03:29:58Z"
+
+[[items.tasks]]
+id = "TASK-0014"
+title = "layout"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T03:29:58Z"
+
+[[items.tasks]]
+id = "TASK-0015"
+title = "editor"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T03:29:58Z"
+
+[[items.tasks]]
+id = "TASK-0016"
+title = "editor"
+status = "open"
+severity = "medium"
+created_at = "2026-11-22T03:29:58Z"
