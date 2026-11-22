@@ -3,6 +3,7 @@ pub mod chrome;
 pub mod cli;
 pub mod find_bar;
 pub mod layout_tree;
+pub mod modals;
 pub mod mouse;
 pub mod palette;
 pub mod preview_pane;
@@ -16,6 +17,10 @@ pub use chrome::{
 pub use cli::{execute_dict_import, Cli, Command, DictCommand};
 pub use find_bar::{handle_find_bar_key, render_find_bar, FindBarState, FindFocus};
 pub use layout_tree::{compute_screen_regions, rgb_to_color, segment_to_style, ScreenRegions};
+pub use modals::{
+    centered_rect, handle_confirm_modal_key, handle_file_prompt_key, handle_spell_quick_fix_key,
+    render_confirm_modal, render_file_prompt, render_spell_quick_fix,
+};
 pub use mouse::{MouseContext, MouseRouter};
 pub use palette::{
     build_palette_entries, discover_installed_locales, filter_palette_entries, handle_palette_key,
