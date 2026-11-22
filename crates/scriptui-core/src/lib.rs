@@ -1,11 +1,14 @@
 pub mod buffer;
+pub mod config;
 pub mod error;
 pub mod history;
 pub mod indent;
 pub mod search;
 pub mod selection;
+pub mod theme;
 
 pub use buffer::{BufferEdit, DocumentBuffer};
+pub use config::AppConfig;
 pub use error::{ScriptuiError, ScriptuiResult};
 pub use history::{EditTransaction, UndoStack};
 pub use indent::{
@@ -15,3 +18,4 @@ pub use search::{
     find_all, next_match, prev_match, replace_all, select_all_occurrences, SearchMatch, SearchQuery,
 };
 pub use selection::{Position, Selection, SelectionSet};
+pub use theme::{builtin_theme_names, default_theme, resolve_theme, RgbColor, Theme, ThemePalette};
