@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 10):** Prove every user-facing behavior documented in `README.md` works end-to-end: close automated test coverage gaps across `scriptui-core` (including `TASK-0053`, `STEP 10A`), `scriptui-tui` `TestBackend` flows (`STEP 10B`), and CLI/config/theme/dict-import (including `TASK-0048`, `STEP 10C`), backed by a README coverage matrix and Linux desktop terminal `[USER]` checklist in `docs/functional-verification-matrix.md`.
+**Phase goal (Phase 11):** Establish automated dependency security/license enforcement (`deny.toml` + `cargo deny check`, `STEP 11A`) and complete a read-only whole-codebase multiagent audit (`[USER] 11B`) covering security/robustness, correctness, performance, dependency licenses/advisories, and code quality, recording rated findings in `docs/codebase-audit-report.md` and filing every finding as a pending `neb` item for Phase 12.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,9 +28,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 10A** | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/tests/editor_state_pipeline.rs` | — |
-| 2 | **STEP 10B** | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` | — |
-| 3 | **STEP 10C** | `/goal` | cli | `crates/scriptui-tui/tests/tui_integration.rs` | — |
+| 1 | **STEP 11A** | `/goal` | tooling | `deny.toml` | — |
+| 2 | **[USER] 11B** | `/teamwork` | Multiagent read-only codebase audit & report | `docs/codebase-audit-report.md` | STEP 11A |
 
 ### Completed
 
@@ -80,6 +79,9 @@
 | **STEP 8E** | Done (`4b7b777`) | `/goal` | docs | `CHANGELOG.md`, `README.md` |
 | **STEP 9A** | Done (`cf4c593`) | `/goal` | preview | `crates/scriptui-core/src/preview.rs` |
 | **STEP 9B** | Done (`1fd9ba3`) | `/goal` | spell | `crates/scriptui-core/assets/dicts/en_US.aff`, `crates/scriptui-core/assets/dicts/en_US.dic`, `crates/scriptui-core/src/spell.rs` |
+| **STEP 10A** | Done (`511824c`) | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/tests/editor_state_pipeline.rs` |
+| **STEP 10B** | Done (`ec1a9ee`) | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` |
+| **STEP 10C** | Done (`26bed7f`) | `/goal` | cli | `crates/scriptui-tui/tests/tui_integration.rs` |
 
 ### Future phases
 
@@ -676,6 +678,72 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'CARGO_PKG_VERSION' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn cli_binary_version_help_and_dict_import_with_xdg_config_home' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn cli_startup_opens_multiple_files_and_overrides_config' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn custom_toml_theme_overrides_builtin_and_validates_names' crates/scriptui-tui/tests/tui_integration.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 11 Step Blocks
+
+### STEP 11A: Add `deny.toml` & Verify `cargo deny check` Locally
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 11A: Add workspace root `deny.toml` enforcing RustSec advisories, SPDX license allowlist, dependency bans, and registry sources, verified cleanly with `cargo deny check`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - deny.toml (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml:1-18 (workspace package metadata and MIT license)
+  - crates/scriptui-core/Cargo.toml:1-23 (core dependencies)
+  - crates/scriptui-tui/Cargo.toml:1-22 (tui dependencies)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify `Cargo.toml`, `Cargo.lock`, Rust source files, or `docs/*`. Do NOT globally disable `unmaintained`, `unsound`, or `yanked` advisory checks.
+
+[PRE_GATE]
+command -v cargo-deny >/dev/null
+
+[MUTATION_SPEC]
+Goal: Running `cargo deny check` at the workspace root enforces dependency security advisories, SPDX license compliance, wildcard/version bans, and registry source restrictions and exits `0` with every transitive exception explicitly documented.
+
+Contract & Behavior:
+  1. `deny.toml` (cargo-deny v2 schema compatible with `cargo-deny 0.20+`):
+     - `[graph]`: set `targets` to `["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]` and `all-features = true`.
+     - `[advisories]`:
+       - Keep vulnerability, unsound, and yanked advisory checks enabled at default strictness (`deny`).
+       - Ignore only the three unmaintained transitive advisories that have no safe upstream upgrade in the current dependency tree, each with a `reason` documenting its crate chain:
+         - `RUSTSEC-2025-0141` (`bincode 1.3.3` via `syntect 5.3.0`)
+         - `RUSTSEC-2024-0436` (`paste 1.0.15` via `ratatui 0.29.0`)
+         - `RUSTSEC-2024-0320` (`yaml-rust 0.4.5` via `syntect 5.3.0`)
+     - `[licenses]`:
+       - Set `confidence-threshold = 0.8`.
+       - Allow only the SPDX licenses present in the workspace dependency graph: `"MIT"`, `"Apache-2.0"`, `"Apache-2.0 WITH LLVM-exception"`, `"BSD-2-Clause"`, `"BSD-3-Clause"`, `"0BSD"`, `"BSL-1.0"`, `"Zlib"`, `"Unlicense"`, `"Unicode-3.0"`, and `"MPL-2.0"` (with an inline comment noting `"MPL-2.0"` is for `spellbook`, file-level weak copyleft).
+     - `[bans]`:
+       - `multiple-versions = "warn"`
+       - `wildcards = "deny"`
+       - `highlight = "all"`
+     - `[sources]`:
+       - `unknown-registry = "deny"`
+       - `unknown-git = "deny"`
+       - `allow-registry = ["https://github.com/rust-lang/crates.io-index"]`
+       - `allow-git = []`
+
+Must still work:
+  - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` continue to pass unchanged.
+
+Drops: none
+
+Tests:
+  - `cargo deny check` (advisories, licenses, bans, sources): executed against the workspace `Cargo.lock` -> exits `0` with zero unapproved licenses, zero disallowed sources, and zero unacknowledged advisories.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo deny check && grep -qE 'RUSTSEC-2025-0141' deny.toml && grep -qE 'RUSTSEC-2024-0436' deny.toml && grep -qE 'RUSTSEC-2024-0320' deny.toml && grep -qE '"MPL-2.0"' deny.toml
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
