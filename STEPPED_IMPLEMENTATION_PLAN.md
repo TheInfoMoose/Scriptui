@@ -81,39 +81,45 @@
 **Decisions (2026-11-22):**
 - Phase 8 cascaded (8A POST_GATE fault → 8B/8C PRE_GATEs failed); 8C moves out so Phase 8 is local-only release prep (8A + 8B).
 - Release targets stay `x86_64-unknown-linux-gnu` + `aarch64-apple-darwin`; no Windows or macOS x86_64 for v0.1.0.
-- Functional verification and a full app audit run **before** the `v0.1.0` tag, so the tag ships an audited, verified build.
+- Known bugs (`BUG-0012`, `BUG-0013`, both `status = "open"` in neb), functional verification, and the full multiagent audit + fixes run **before** CI & release workflows and the `v0.1.0` tag.
 - Because the tag now lands several phases after STEP 8B, the CHANGELOG release date is re-stamped in the release-cut phase.
 
-**Phase 9 — CI & release workflows (risky: only verifiable on GitHub).**
-- Goal: GitHub Actions CI on `master` push/PR (fmt, clippy, test, release build) and a tag-triggered release workflow producing Linux x86_64 + macOS arm64 tarballs with SHA256 files.
-- Done: both workflow files exist and pass a local syntax gate; `[USER]` pushes `master` and CI goes green; the release workflow is exercised once per OQ-2 before the real tag.
-- Steps: 9A CI workflow (`.github/workflows/ci.yml`); 9B tag-triggered release workflow (`.github/workflows/release.yml`); 9C `[USER]` push `master`, confirm CI green, run the release dry run.
-- Carries over deferred STEP 8C / TASK-0044. `/phase-plan 8` removes the 8C row from Up Next; `/phase-plan 9` replaces the old 8C block (its `python3 yaml` POST_GATE is OQ-1).
+**Phase 9 — Known bug fixes: BUG-0012 & BUG-0013 (routine).**
+- Note for `/phase-plan 9`: `BUG-0012` and `BUG-0013` both have `status = "open"` in neb, whereas `neb list --status pending` queries `pending` by default — run `neb show BUG-0012` and `neb show BUG-0013` explicitly when staging Phase 9.
+- Goal: fix preview markdown line breaks (`BUG-0012`, block quotes/bullets pressing Enter renders on the previous line in preview) and spellcheck dictionary coverage (`BUG-0013`, `en_US` dictionary rejects contractions like `"don't"` and standard words like `"emphasized"` and `"cascade"`).
+- Done: both `BUG-0012` and `BUG-0013` are closed with regression tests that fail before the fix and pass after.
+- Steps: 9A fix `BUG-0012` (markdown/preview line break handling + tests); 9B fix `BUG-0013` (validate/update `en_US` dictionary and/or tokenization + tests).
 
 **Phase 10 — Functional verification (routine).**
 - Goal: prove every user-facing behavior the README documents actually works, automated where possible and by hand where a real terminal is required.
 - Done: a coverage matrix in `docs/` maps every README CLI flag, config field, keybinding, mouse action, theme and spellcheck flow to an automated test or a `[USER]` checklist row; automated gaps are closed; the checklist passes on Linux and macOS (OQ-3); every failure is a neb bug.
 - Steps: 10A core-engine coverage gaps (`scriptui-core` tests); 10B TUI coverage gaps (`TestBackend` integration tests: keybindings, mouse, modals, preview, find/replace); 10C CLI/config/theme/dict-import coverage gaps; 10D `[USER]` real-terminal checklist run (raw mode restore, bracketed paste, OSC 52, mouse, resize).
 
-**Phase 11 — Full app audit (read-only review + tooling).**
-- Goal: a whole-codebase audit before release: security/robustness (file I/O and paths, theme/dict import, regex input, panics/`unwrap`s, terminal restore on panic), correctness (Unicode, large files, undo/redo edge cases), performance, dependency licenses/advisories, and code quality.
-- Done: an audit report in `docs/` with each finding rated; every finding filed as a pending neb item; `cargo deny` (advisories + licenses) runs clean or with documented exceptions.
-- Steps: 11A `[REVIEW]` fresh Claude session writes the audit report and files neb items; 11B add `deny.toml` and wire `cargo deny check` into CI.
+**Phase 11 — Full multiagent app audit (read-only review + tooling).**
+- Goal: a whole-codebase multiagent audit before CI and release: security/robustness (file I/O and paths, theme/dict import, regex input, panics/`unwrap`s, terminal restore on panic), correctness (Unicode, large files, undo/redo edge cases), performance, dependency licenses/advisories, and code quality.
+- Done: an audit report in `docs/` with each finding rated; every finding filed as a pending neb item; `deny.toml` added and `cargo deny check` (advisories + licenses) runs clean locally or with documented exceptions.
+- Steps: 11A `[REVIEW]` multiagent audit writes the audit report in `docs/` and files pending neb items; 11B add `deny.toml` and verify `cargo deny check` locally (CI integration follows in Phase 13).
 
 **Phase 12 — Audit and verification fixes (risky: scope set by findings).**
-- Goal: fix the neb bugs from Phases 10–11 picked at the Phase 11 review.
+- Goal: fix the neb bugs from Phases 10–11 (and any picked pending items from earlier phases) selected at the Phase 11 review.
 - Done: every picked item closed with a test that fails before the fix; unpicked items stay pending with a target version.
 - Steps: staged by `/phase-plan 12` from the picked neb items (one step per fix, 1–3 files each).
 
-**Phase 13 — v0.1.0 release cut.**
+**Phase 13 — CI & release workflows (risky: only verifiable on GitHub).**
+- Goal: GitHub Actions CI on `master` push/PR (fmt, clippy, test, `cargo deny check`, release build) and a tag-triggered release workflow producing Linux x86_64 + macOS arm64 tarballs with SHA256 files.
+- Done: both workflow files exist and pass a local syntax gate; `[USER]` pushes `master` and CI goes green; the release workflow is exercised once per OQ-2 before the real tag.
+- Steps: 13A CI workflow (`.github/workflows/ci.yml`); 13B tag-triggered release workflow (`.github/workflows/release.yml`); 13C `[USER]` push `master`, confirm CI green, run the release dry run.
+- Carries over deferred STEP 8C / TASK-0044. `/phase-plan 13` replaces the old 8C block (its `python3 yaml` POST_GATE is OQ-1).
+
+**Phase 14 — v0.1.0 release cut.**
 - Goal: ship `v0.1.0`.
 - Done: CHANGELOG date matches the tag date; `master` pushed; annotated tag `v0.1.0` pushed; GitHub release has both tarballs and `.sha256` files.
-- Steps: 13A re-stamp `CHANGELOG.md` `[0.1.0]` date and add any Phase 10–12 fixes under it; 13B `[USER]` push `master`, `git tag -a v0.1.0 -m "ScripTUI v0.1.0"`, push the tag, check the release assets.
+- Steps: 14A re-stamp `CHANGELOG.md` `[0.1.0]` date and add any Phase 9–12 fixes under it; 14B `[USER]` push `master`, `git tag -a v0.1.0 -m "ScripTUI v0.1.0"`, push the tag, check the release assets.
 
 ### Open Questions
 
-- **OQ-1 (Phase 9):** The old STEP 8C POST_GATE runs `python3 -c 'import yaml'`. PyYAML may not be on the Orrery host. Confirm it's installed, or use a gate with no extra package (`actionlint` if present). Waits on: user.
-- **OQ-2 (Phase 9):** How to exercise `release.yml` before the real tag: push a prerelease tag (`v0.1.0-rc.1`) and delete the release afterward, or add a `workflow_dispatch` trigger that builds without publishing. Waits on: user.
+- **OQ-1 (Phase 13):** The old STEP 8C POST_GATE runs `python3 -c 'import yaml'`. PyYAML may not be on the Orrery host. Confirm it's installed, or use a gate with no extra package (`actionlint` if present). Waits on: user.
+- **OQ-2 (Phase 13):** How to exercise `release.yml` before the real tag: push a prerelease tag (`v0.1.0-rc.1`) and delete the release afterward, or add a `workflow_dispatch` trigger that builds without publishing. Waits on: user.
 - **OQ-3 (Phase 10):** Which OS + terminal emulator pairs does the `[USER]` checklist run on (OSC 52 and mouse behavior differ by terminal)? Waits on: user.
 
 ### Parked
