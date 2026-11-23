@@ -856,15 +856,7 @@ impl<'a> PreviewRenderer<'a> {
                     }));
                 }
             }
-            NodeValue::SoftBreak => {
-                out.push(InlineToken::Segment(StyledSegment {
-                    text: " ".to_string(),
-                    fg: style.fg,
-                    bg: style.bg,
-                    flags: style.flags,
-                }));
-            }
-            NodeValue::LineBreak => {
+            NodeValue::SoftBreak | NodeValue::LineBreak => {
                 out.push(InlineToken::HardBreak);
             }
             NodeValue::Code(code) => {
@@ -1314,5 +1306,83 @@ mod tests {
                 "heading src={heading_src} mapped to preview={preview_idx} -> src={roundtrip}"
             );
         }
+    }
+
+    #[test]
+    fn preview_soft_break_in_blockquote_and_bullet_renders_on_new_lines() {
+        let md = concat!(
+            "> first quote line\n",
+            "> second quote line\n",
+            "\n",
+            "- bullet line one\n",
+            "  bullet line two\n",
+            "\n",
+            "plain one\n",
+            "plain two\n",
+        );
+
+        let theme = default_theme().expect("default theme");
+        let doc = build_preview(md, &theme, 80);
+        let plain = doc.plain_lines();
+        let joined = plain.join("\n");
+
+        let quote1_idx = plain
+            .iter()
+            .position(|l| l.contains("first quote line"))
+            .expect("missing first quote line");
+        let quote2_idx = plain
+            .iter()
+            .position(|l| l.contains("second quote line"))
+            .expect("missing second quote line");
+        assert!(
+            quote2_idx > quote1_idx,
+            "expected second quote line after first quote line, got:\n{joined}"
+        );
+        assert!(
+            plain[quote1_idx].starts_with("│ "),
+            "expected blockquote prefix on first quote line, got: {:?}",
+            plain[quote1_idx]
+        );
+        assert!(
+            plain[quote2_idx].starts_with("│ "),
+            "expected blockquote prefix on second quote line, got: {:?}",
+            plain[quote2_idx]
+        );
+
+        let bullet1_idx = plain
+            .iter()
+            .position(|l| l.contains("bullet line one"))
+            .expect("missing bullet line one");
+        let bullet2_idx = plain
+            .iter()
+            .position(|l| l.contains("bullet line two"))
+            .expect("missing bullet line two");
+        assert!(
+            bullet2_idx > bullet1_idx,
+            "expected bullet line two after bullet line one, got:\n{joined}"
+        );
+        assert!(
+            plain[bullet1_idx].starts_with("• "),
+            "expected bullet marker on first bullet line, got: {:?}",
+            plain[bullet1_idx]
+        );
+        assert!(
+            plain[bullet2_idx].starts_with("  ") && !plain[bullet2_idx].starts_with("• "),
+            "expected continuation indent without bullet marker on second bullet line, got: {:?}",
+            plain[bullet2_idx]
+        );
+
+        let plain1_idx = plain
+            .iter()
+            .position(|l| l.contains("plain one"))
+            .expect("missing plain one");
+        let plain2_idx = plain
+            .iter()
+            .position(|l| l.contains("plain two"))
+            .expect("missing plain two");
+        assert!(
+            plain2_idx > plain1_idx,
+            "expected plain two after plain one, got:\n{joined}"
+        );
     }
 }
