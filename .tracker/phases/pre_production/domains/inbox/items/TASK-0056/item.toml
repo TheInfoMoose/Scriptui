@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0056"
 type = "task"
 title = "cli"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T02:32:47Z"
-updated_at = "2026-11-23T02:32:47Z"
+updated_at = "2026-11-23T02:44:27Z"
 source_ref = "STEP 10C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0056@2026-11-23T02:42:06Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "26bed7f"
+summary = "STEP 10C: CLI Binary, `XDG_CONFIG_HOME`, Config & Custom Theme Coverage (`TASK-0048`) (phased check PASS)"
