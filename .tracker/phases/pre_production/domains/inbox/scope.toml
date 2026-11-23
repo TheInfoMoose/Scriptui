@@ -87,16 +87,37 @@ created_at = "2026-11-22T14:25:37Z"
 [[items.bugs]]
 id = "BUG-0012"
 title = "Preview Markdown Line Break Fault"
-status = "open"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-22T23:48:01Z"
 
 [[items.bugs]]
 id = "BUG-0013"
 title = "Spellcheck Fault"
-status = "open"
+status = "closed"
 severity = "high"
 created_at = "2026-11-22T23:52:21Z"
+
+[[items.bugs]]
+id = "BUG-0014"
+title = "Preview unconditional SoftBreak->HardBreak breaks paragraph reflow on hard-wrapped Markdown"
+status = "pending"
+severity = "low"
+created_at = "2026-11-23T02:23:02Z"
+
+[[items.bugs]]
+id = "BUG-0015"
+title = "Multi-line Setext heading emits non-monotonic source_line on underline rule"
+status = "pending"
+severity = "low"
+created_at = "2026-11-23T02:23:08Z"
+
+[[items.bugs]]
+id = "BUG-0016"
+title = "SpellEngine ignore_word and PersonalDictionary::add do not normalize curly apostrophes"
+status = "pending"
+severity = "low"
+created_at = "2026-11-23T02:23:12Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -461,3 +482,10 @@ title = "spell"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-23T01:49:48Z"
+
+[[items.tasks]]
+id = "TASK-0053"
+title = "Add unit test for SpellEngine::suggest with curly apostrophe"
+status = "pending"
+severity = "low"
+created_at = "2026-11-23T02:23:17Z"
