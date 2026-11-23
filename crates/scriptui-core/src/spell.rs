@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -209,24 +210,34 @@ impl SpellEngine {
     }
 
     pub fn is_correct(&self, word: &str) -> bool {
-        if self.ignored.contains(word) || self.personal.contains(word) || self.dict.check(word) {
+        let normalized = normalize_apostrophes(word);
+        if self.check_exact(word) || (normalized.as_ref() != word && self.check_exact(&normalized))
+        {
             return true;
         }
-        if word.chars().any(char::is_uppercase) {
-            let lower = word.to_lowercase();
-            if self.ignored.contains(&lower)
-                || self.personal.contains(&lower)
-                || self.dict.check(&lower)
-            {
+        if normalized.chars().any(char::is_uppercase) {
+            let lower = normalized.to_lowercase();
+            if self.check_exact(&lower) {
                 return true;
+            }
+            if normalized.as_ref() != word {
+                let lower_raw = word.to_lowercase();
+                if self.check_exact(&lower_raw) {
+                    return true;
+                }
             }
         }
         false
     }
 
+    fn check_exact(&self, word: &str) -> bool {
+        self.ignored.contains(word) || self.personal.contains(word) || self.dict.check(word)
+    }
+
     pub fn suggest(&self, word: &str, limit: usize) -> Vec<String> {
+        let normalized = normalize_apostrophes(word);
         let mut out = Vec::new();
-        self.dict.suggest(word, &mut out);
+        self.dict.suggest(&normalized, &mut out);
         out.truncate(limit);
         out
     }
@@ -384,6 +395,14 @@ pub fn import_locale_files(
     Ok((dic_dest, aff_dest))
 }
 
+fn normalize_apostrophes(word: &str) -> Cow<'_, str> {
+    if word.contains('\u{2019}') {
+        Cow::Owned(word.replace('\u{2019}', "'"))
+    } else {
+        Cow::Borrowed(word)
+    }
+}
+
 fn is_apostrophe(ch: char) -> bool {
     matches!(ch, '\'' | '\u{2019}')
 }
@@ -475,5 +494,25 @@ mod tests {
 
         let traversal = validate_locale_name("../etc");
         assert!(matches!(traversal, Err(ScriptuiError::InvalidLocale(_))));
+    }
+
+    #[test]
+    fn default_en_us_accepts_contractions_and_standard_english_words() {
+        let engine = SpellEngine::default_en_us().unwrap();
+        let diags = engine.check_document(
+            "I don't think you\u{2019}ve emphasized the cascade. Don't stop.",
+            &[],
+        );
+        assert!(
+            diags.is_empty(),
+            "expected no spell diagnostics for valid English text, got {diags:?}"
+        );
+
+        assert!(engine.is_correct("don't"));
+        assert!(engine.is_correct("don\u{2019}t"));
+        assert!(engine.is_correct("Don't"));
+        assert!(engine.is_correct("emphasized"));
+        assert!(engine.is_correct("cascade"));
+        assert!(!engine.is_correct("wrld"));
     }
 }
