@@ -119,6 +119,125 @@ status = "pending"
 severity = "low"
 created_at = "2026-11-23T02:23:12Z"
 
+[[items.bugs]]
+id = "BUG-0017"
+title = "UTF-8 slice panic &trimmed[1..6] in indent::parse_task_list"
+status = "pending"
+severity = "critical"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0018"
+title = "Startup ignores --locale / config.spell_locale and custom themes, swallows config.toml errors"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0019"
+title = "Ctrl+V (Action::Paste) is bound and documented but executes a no-op"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0020"
+title = "DocumentBuffer::dirty never resets when undoing back to saved state"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0021"
+title = "Opening a non-existent file path on CLI fails startup"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0022"
+title = "TuiApp::handle_key_event drops KeyEventKind::Repeat events"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0023"
+title = "Per-frame synchronous preview rebuild and SyntaxSet::load_defaults_newlines() reconstruction"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0024"
+title = "Missing OS signal handling (SIGTERM/SIGHUP/SIGTSTP) and exit error printed on alt screen"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0025"
+title = "Predictable temp paths without O_EXCL in save_atomic/save_to_file and non-atomic import_locale_files"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.bugs]]
+id = "BUG-0026"
+title = "Find/Replace bar leaks unhandled navigation keys to editor and retains stale focus/matches"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0027"
+title = "PreviewMode::Expanded scroll sync uses visual scroll_line and preview width uses chars().count()"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0028"
+title = "Super/Meta modifiers leak into character insertion and navigation"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0029"
+title = "Multi-cursor collapse in indent/move/newline and SelectionSet::primary not remapped in normalize()"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0030"
+title = "Unsanitized C0/C1 control chars in UI chrome/preview/modals and viewport combining-char/wide-cursor/CRLF-delete defects"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0031"
+title = "GFM parsing and spellcheck gaps: PersonalDictionary unwired, locale switch drops personal/ignored words, autolink/fence/CRLF/digit edge cases"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0032"
+title = "Missing symlink containment checks on theme/locale loads and unbounded file/OSC 52 payloads"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
+[[items.bugs]]
+id = "BUG-0033"
+title = "Tab bar silent truncation, overlay input editing/scroll limits, and Ctrl+Shift+L cursor-word seeding"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
+
 [[items.tasks]]
 id = "TASK-0001"
 title = "core"
@@ -545,3 +664,24 @@ title = "Allow crates/scriptui-tui/Cargo.toml update for cargo-deny wildcard che
 status = "pending"
 severity = "high"
 created_at = "2026-11-23T13:13:44Z"
+
+[[items.tasks]]
+id = "TASK-0062"
+title = "Add third-party license notice (en_US dicts, spellbook MPL-2.0) and complete Cargo.toml release metadata"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.tasks]]
+id = "TASK-0063"
+title = "Scrub internal host path from docs/codebase-audit-report.md, commit report, and gitignore .agents/"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:34:51Z"
+
+[[items.tasks]]
+id = "TASK-0064"
+title = "Add TerminalGuard/run_event_loop tests and complete STEP 10D real-terminal verification"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-23T14:35:06Z"
