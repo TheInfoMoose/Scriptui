@@ -515,4 +515,18 @@ mod tests {
         assert!(engine.is_correct("cascade"));
         assert!(!engine.is_correct("wrld"));
     }
+
+    #[test]
+    fn default_en_us_suggests_for_curly_apostrophe_misspelling() {
+        let engine = SpellEngine::default_en_us().unwrap();
+        let suggestions = engine.suggest("don\u{2019}tt", 5);
+        assert!(
+            !suggestions.is_empty(),
+            "expected non-empty suggestions for curly-apostrophe misspelling"
+        );
+        assert!(
+            suggestions.iter().any(|s| s == "don't"),
+            "expected \"don't\" in suggestions, got {suggestions:?}"
+        );
+    }
 }
