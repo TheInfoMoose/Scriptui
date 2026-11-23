@@ -535,6 +535,13 @@ created_at = "2026-11-23T03:12:38Z"
 [[items.tasks]]
 id = "TASK-0060"
 title = "tooling"
-status = "open"
+status = "pending"
 severity = "medium"
 created_at = "2026-11-23T03:45:18Z"
+
+[[items.tasks]]
+id = "TASK-0061"
+title = "Allow crates/scriptui-tui/Cargo.toml update for cargo-deny wildcard check"
+status = "pending"
+severity = "high"
+created_at = "2026-11-23T13:13:44Z"
