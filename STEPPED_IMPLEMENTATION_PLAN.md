@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 9):** Fix the two open functional bugs before functional verification (`Phase 10`): preview markdown soft-break rendering in block quotes, lists, and paragraphs (`BUG-0012`, `STEP 9A`), and bundled `en_US` Hunspell dictionary coverage for contractions and standard English vocabulary (`BUG-0013`, `STEP 9B`).
+**Phase goal (Phase 10):** Prove every user-facing behavior documented in `README.md` works end-to-end: close automated test coverage gaps across `scriptui-core` (including `TASK-0053`, `STEP 10A`), `scriptui-tui` `TestBackend` flows (`STEP 10B`), and CLI/config/theme/dict-import (including `TASK-0048`, `STEP 10C`), backed by a README coverage matrix and Linux desktop terminal `[USER]` checklist in `docs/functional-verification-matrix.md`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,8 +28,9 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 9A** | `/goal` | preview | `crates/scriptui-core/src/preview.rs` | — |
-| 2 | **STEP 9B** | `/goal` | spell | `crates/scriptui-core/assets/dicts/en_US.aff`, `crates/scriptui-core/assets/dicts/en_US.dic`, `crates/scriptui-core/src/spell.rs` | — |
+| 1 | **STEP 10A** | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/tests/editor_state_pipeline.rs` | — |
+| 2 | **STEP 10B** | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` | — |
+| 3 | **STEP 10C** | `/goal` | cli | `crates/scriptui-tui/tests/tui_integration.rs` | — |
 
 ### Completed
 
@@ -77,6 +78,8 @@
 | **STEP 7C** | Done (`d6c1076`) | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs`, `crates/scriptui-tui/src/mouse.rs` |
 | **STEP 8D** | Done (`706671e`) | `/goal` | release | `LICENSE`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `crates/scriptui-tui/tests/tui_integration.rs` |
 | **STEP 8E** | Done (`4b7b777`) | `/goal` | docs | `CHANGELOG.md`, `README.md` |
+| **STEP 9A** | Done (`cf4c593`) | `/goal` | preview | `crates/scriptui-core/src/preview.rs` |
+| **STEP 9B** | Done (`1fd9ba3`) | `/goal` | spell | `crates/scriptui-core/assets/dicts/en_US.aff`, `crates/scriptui-core/assets/dicts/en_US.dic`, `crates/scriptui-core/src/spell.rs` |
 
 ### Future phases
 
@@ -122,7 +125,7 @@
 
 - **OQ-1 (Phase 13):** The old STEP 8C POST_GATE runs `python3 -c 'import yaml'`. PyYAML may not be on the Orrery host. Confirm it's installed, or use a gate with no extra package (`actionlint` if present). Waits on: user.
 - **OQ-2 (Phase 13):** How to exercise `release.yml` before the real tag: push a prerelease tag (`v0.1.0-rc.1`) and delete the release afterward, or add a `workflow_dispatch` trigger that builds without publishing. Waits on: user.
-- **OQ-3 (Phase 10):** Which OS + terminal emulator pairs does the `[USER]` checklist run on (OSC 52 and mouse behavior differ by terminal)? Waits on: user.
+- **OQ-3 (Phase 10 — resolved):** `[USER]` real-terminal checklist targets Linux desktop terminals (e.g., GNOME Terminal / Alacritty / Kitty / WezTerm); checklist lives in `docs/functional-verification-matrix.md`.
 
 ### Parked
 
@@ -502,6 +505,177 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn default_en_us_accepts_contractions_and_standard_english_words' crates/scriptui-core/src/spell.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 10 Step Blocks
+
+### STEP 10A: Core-Engine README Coverage Gaps & Curly-Apostrophe Suggest Test (`TASK-0053`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 10A: Add unit/integration tests closing scriptui-core README coverage gaps (full CUA keymap, config flags, navigation/selection/escape) and curly-apostrophe spell suggestions (TASK-0053).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/spell.rs
+  - crates/scriptui-core/tests/editor_state_pipeline.rs
+READ_ONLY_REFS:
+  - README.md:60-72 (Configuration fields and defaults)
+  - README.md:111-188 (Keybindings CUA Default)
+  - crates/scriptui-core/src/keymap.rs:160-385 (Keymap::default_cua)
+  - crates/scriptui-core/src/config.rs:24-84 (AppConfig)
+  - crates/scriptui-core/src/editor.rs:245-275,665-760 (EditorState::new, dispatch)
+  - crates/scriptui-core/src/spell.rs:237-244 (SpellEngine::suggest)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify production logic unless a test exposes a genuine bug (if so, file a pending neb bug rather than changing files outside ALLOWED_FILES). Do NOT weaken any existing test.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Every README-documented CUA keybinding, `AppConfig` option, core navigation/selection/escape action, and `SpellEngine::suggest` with curly apostrophes (`\u{2019}`) is verified by automated tests in `scriptui-core`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/spell.rs` (unit tests only):
+     - Add `default_en_us_suggests_for_curly_apostrophe_misspelling` covering `SpellEngine::suggest` on a misspelled contraction containing `\u{2019}` (closes `TASK-0053`).
+  2. `crates/scriptui-core/tests/editor_state_pipeline.rs` (integration tests only):
+     - Add `readme_default_cua_keymap_covers_every_documented_shortcut` asserting `Keymap::default_cua().lookup(...)` maps every shortcut documented in `README.md` (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+PageDown`, `Ctrl+PageUp`, `Ctrl+Q`, `Enter`, `Backspace`, `Delete`, `Tab`, `Shift+Tab`/`BackTab`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+A`, `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`, `Esc`, `Ctrl+F`, `Ctrl+H`, `F3`, `Shift+F3`, `Ctrl+Shift+L`, `Ctrl+P`, `F1`, `Ctrl+.`, `Ctrl+Shift+P`, `Alt+P`, `Alt+Z`, `Left`/`Right`/`Up`/`Down`, `Home`/`End`, `PageUp`/`PageDown`, `Shift+Left`/`Shift+Right`/`Shift+Up`/`Shift+Down`, `Shift+Home`/`Shift+End`) to its exact `Action`.
+     - Add `config_flags_control_spellcheck_preview_split_and_soft_wrap` verifying `AppConfig::load_or_default` (missing path returns defaults; partial TOML merges defaults; invalid TOML returns `Err`), `spell_enabled = false` yields zero spell diagnostics in `EditorState::active_analysis()`, `preview_split_percent = 35` produces `PreviewMode::Split(35)` on `Action::TogglePreview`, and `Action::ToggleSoftWrap` / `Action::ToggleLineNumbers` flip `config.soft_wrap` / `config.line_numbers`.
+     - Add `editor_navigation_selection_cut_find_prev_and_escape_collapse` exercising `SelectAll`, `Cut`, `MoveHome`/`MoveEnd`/`PageUp`/`PageDown`, `SelectLeft`/`SelectRight`/`SelectUp`/`SelectDown`/`SelectHome`/`SelectEnd`, `FindNext`/`FindPrev` wrap-around, and `Action::Escape` collapsing a multi-cursor selection back to one cursor.
+
+Must still work:
+  - All existing `scriptui-core` unit and integration tests unchanged.
+
+Drops: none
+
+Tests:
+  - `default_en_us_suggests_for_curly_apostrophe_misspelling`: `SpellEngine::default_en_us().suggest("don\u{2019}tt", 5)` -> non-empty suggestions containing `"don't"`.
+  - `readme_default_cua_keymap_covers_every_documented_shortcut`: `Keymap::default_cua()` -> every README CUA shortcut resolves to its documented `Action`.
+  - `config_flags_control_spellcheck_preview_split_and_soft_wrap`: `AppConfig::load_or_default` on missing/partial/invalid temp files + `EditorState::new` with `spell_enabled = false` and `preview_split_percent = 35` -> zero spell diagnostics on `"wrld"`, `TogglePreview` enters `PreviewMode::Split(35)`, and `ToggleSoftWrap`/`ToggleLineNumbers` toggle config booleans.
+  - `editor_navigation_selection_cut_find_prev_and_escape_collapse`: `EditorState::new(AppConfig::default())` with multi-line text -> `SelectEnd` selects to line end, `Cut` removes selection, `FindNext`/`FindPrev` cycle matches in both directions, and `Escape` after `SelectAllOccurrences` collapses `selection().len()` to `1`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn default_en_us_suggests_for_curly_apostrophe_misspelling' crates/scriptui-core/src/spell.rs && grep -qE 'fn readme_default_cua_keymap_covers_every_documented_shortcut' crates/scriptui-core/tests/editor_state_pipeline.rs && grep -qE 'fn config_flags_control_spellcheck_preview_split_and_soft_wrap' crates/scriptui-core/tests/editor_state_pipeline.rs && grep -qE 'fn editor_navigation_selection_cut_find_prev_and_escape_collapse' crates/scriptui-core/tests/editor_state_pipeline.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 10B: TUI End-to-End Coverage Gaps (`TestBackend` Keybindings, Modals, Mouse & Narrow Layout)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 10B: Add TestBackend integration tests in scriptui-tui covering README file/buffer modals, Find/Replace inline shortcuts, editing/OSC52/redo, mouse interactions, and narrow-viewport rendering.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/tests/tui_integration.rs
+READ_ONLY_REFS:
+  - README.md:111-201 (Keybindings and Mouse Interactions)
+  - crates/scriptui-tui/src/app.rs:98-355 (render_frame, handle_key_event, handle_mouse_event, handle_paste_event)
+  - crates/scriptui-tui/src/modals.rs:103-310 (spell quick fix, confirm modal, file prompt)
+  - crates/scriptui-tui/src/find_bar.rs:1-160 (FindFocus, handle_find_bar_key)
+  - crates/scriptui-tui/src/mouse.rs:1-180 (MouseRouter::handle_mouse)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify any file under `src/`. Do NOT weaken or remove any existing test in `tui_integration.rs`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: All README-documented interactive TUI workflows (file/buffer lifecycle and dirty confirmation modals, Find/Replace inline shortcuts and F3 navigation, editing/selection/OSC 52 cut & copy/redo/bracketed paste, mouse click/drag/tab/right-click spell/divider resize, and narrow-terminal rendering with long text) are verified through real `TuiApp` event handlers and `TestBackend` rendering.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/tests/tui_integration.rs`:
+     - Add 5 integration tests exercising `TuiApp::handle_key_event`, `TuiApp::handle_mouse_event`, `TuiApp::handle_paste_event`, and `TuiApp::render_frame` on `TestBackend`:
+       a. `tui_file_buffer_lifecycle_and_dirty_confirm_modals`: tests `Ctrl+N` (new buffer), `Ctrl+PageDown`/`Ctrl+PageUp` (tab switch), `Ctrl+Shift+S` (`SaveAsPrompt` -> type temp file path -> `Enter` writes file to disk), further edit + `Ctrl+S` (saves updated content), `Ctrl+O` (`OpenFilePrompt` -> type second temp file path -> `Enter` loads it), dirty edit + `Ctrl+W` (`ConfirmCloseBuffer` -> `n` keeps buffer, `Ctrl+W` then `y` closes it), dirty edit + `Ctrl+Q` (`ConfirmQuit` -> `n` cancels, `Ctrl+Q` then `y` sets `state.should_quit == true`).
+       b. `tui_find_replace_bar_inline_shortcuts_and_f3_navigation`: tests `Ctrl+H` (opens `OverlayMode::Replace`), `Alt+C` (toggles `case_sensitive`), `Alt+W` (toggles `whole_word`), `Alt+R` (toggles `use_regex`), `Tab` / `Shift+Tab` (switches `find_bar.focus`), `Enter` (next match in Find / replace active match in Replace), `Shift+Enter` (previous match), `Ctrl+Enter` (replace all), `Esc` (closes bar), `F3` / `Shift+F3` (navigates matches after closing bar), and `Ctrl+Shift+L` (selects all occurrences as multi-cursors).
+       c. `tui_editing_selection_osc52_cut_copy_redo_and_bracketed_paste`: tests `Ctrl+A` (select all), `Ctrl+C` (writes OSC 52 `\x1b]52;c;` sequence to clipboard buffer), `Ctrl+X` (writes OSC 52 and deletes selection), `handle_paste_event` (inserts pasted text), `Ctrl+Z` (undo), `Ctrl+Y` and `Ctrl+Shift+Z` (redo), `Shift+Right` / `Shift+End` / `Shift+Home` (extends selection), `Alt+Z` (toggles `config.soft_wrap`), and `Esc` (collapses multi-cursor to 1).
+       d. `tui_mouse_click_drag_tab_right_click_spell_and_split_divider`: renders `TuiApp` on `TestBackend::new(100, 24)` with two tabs and `"hello wrld"` in the active buffer -> left-click inside editor moves caret, left-click + drag + up creates non-empty selection, right-click on `"wrld"` moves caret and opens `OverlayMode::SpellQuickFix`, `Esc` closes modal, left-click on second tab hitbox switches active tab, left-click on preview edge tab opens `PreviewMode::Split(_)`, left-click + drag + up on split divider updates `config.preview_split_percent` clamped within `20..=80`.
+       e. `tui_narrow_viewport_and_long_lines_render_without_panic`: renders `TuiApp` on `TestBackend::new(40, 12)` with a 200-character single line containing a misspelling (`"wrld"`) under both `soft_wrap = true` and `soft_wrap = false`, and with each overlay active (`Find`, `CommandPalette`, `SpellQuickFix`) -> every draw succeeds with non-empty rendered cells in the viewport and overlay regions.
+
+Must still work:
+  - All existing tests in `crates/scriptui-tui/tests/tui_integration.rs` unchanged and passing.
+
+Drops: none
+
+Tests:
+  - `tui_file_buffer_lifecycle_and_dirty_confirm_modals`: `TuiApp::from_cli` + temp dir -> Save As, Save, Open, tab switch, dirty Close/Quit cancel and confirm all produce exact file/buffer/quit states.
+  - `tui_find_replace_bar_inline_shortcuts_and_f3_navigation`: `TuiApp::from_cli` with multi-occurrence text -> all Find/Replace inline shortcuts, `F3`/`Shift+F3`, and `Ctrl+Shift+L` update toggles, matches, text, and selections as documented.
+  - `tui_editing_selection_osc52_cut_copy_redo_and_bracketed_paste`: `TuiApp::from_cli` -> `Ctrl+C`/`Ctrl+X` emit OSC 52, `Ctrl+Z`/`Ctrl+Y`/`Ctrl+Shift+Z` undo/redo, `Shift+Arrows`/`Home`/`End` extend selection, `Alt+Z` toggles soft wrap, `Esc` collapses multi-cursor.
+  - `tui_mouse_click_drag_tab_right_click_spell_and_split_divider`: `TuiApp::render_frame` + `handle_mouse_event` -> editor click/drag, right-click spell quick-fix, tab bar click, preview edge tab click, and split divider drag clamp all succeed.
+  - `tui_narrow_viewport_and_long_lines_render_without_panic`: `TestBackend::new(40, 12)` with 200-char line -> renders cleanly across wrap modes and `Find`/`CommandPalette`/`SpellQuickFix` overlays.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn tui_file_buffer_lifecycle_and_dirty_confirm_modals' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn tui_find_replace_bar_inline_shortcuts_and_f3_navigation' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn tui_editing_selection_osc52_cut_copy_redo_and_bracketed_paste' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn tui_mouse_click_drag_tab_right_click_spell_and_split_divider' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn tui_narrow_viewport_and_long_lines_render_without_panic' crates/scriptui-tui/tests/tui_integration.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 10C: CLI Binary, `XDG_CONFIG_HOME`, Config & Custom Theme Coverage (`TASK-0048`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 10C: Add end-to-end CLI binary, XDG_CONFIG_HOME dict-import, multi-file startup, config-driven TUI rendering, and custom TOML theme tests, and read CARGO_PKG_VERSION in the version test (TASK-0048).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/tests/tui_integration.rs
+READ_ONLY_REFS:
+  - README.md:46-109 (CLI Options, Configuration, Themes, Hunspell Dictionaries)
+  - crates/scriptui-tui/src/main.rs:1-38 (dict import CLI path and XDG_CONFIG_HOME)
+  - crates/scriptui-tui/src/app.rs:65-91 (TuiApp::from_cli)
+  - crates/scriptui-core/src/theme.rs:287-330 (resolve_theme, load_theme_file)
+  - crates/scriptui-tui/tests/tui_integration.rs:465-471 (cli_version_matches_workspace_version)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT mutate process-global environment variables (`std::env::set_var`) in tests (use `Command::env` for subprocess isolation so parallel tests cannot race). Do NOT modify `src/` files.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: The compiled `scriptui` binary's `--version`, `--help`, and `dict import` (respecting `XDG_CONFIG_HOME` and rejecting invalid locales), `TuiApp::from_cli` multi-file startup and flag overrides, `line_numbers = false` / `spell_enabled = false` TUI rendering, and custom TOML theme overrides are verified end-to-end, and `cli_version_matches_workspace_version` reads `env!("CARGO_PKG_VERSION")` instead of hardcoding `"0.1.0"` (closes `TASK-0048`).
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/tests/tui_integration.rs`:
+     - Update `cli_version_matches_workspace_version` to compare `err.to_string().trim()` against `format!("scriptui {}", env!("CARGO_PKG_VERSION"))` (closes `TASK-0048`).
+     - Add `cli_binary_version_help_and_dict_import_with_xdg_config_home` invoking `std::process::Command::new(env!("CARGO_BIN_EXE_scriptui"))` with `.env("XDG_CONFIG_HOME", temp_xdg)`:
+       - `--version` exits 0 and stdout equals `format!("scriptui {}\n", env!("CARGO_PKG_VERSION"))`.
+       - `--help` exits 0 and stdout contains `--theme`, `--locale`, and `dict`.
+       - `dict import xx_CLI <dic> <aff>` exits 0, stdout contains `"Imported dictionary for 'xx_CLI'"`, and `<temp_xdg>/scriptui/dicts/xx_CLI.dic` and `xx_CLI.aff` exist with the source contents.
+       - `dict import ../bad <dic> <aff>` exits non-zero and stderr is non-empty.
+     - Add `cli_startup_opens_multiple_files_and_overrides_config`:
+       - Invokes `TuiApp::from_cli` with two temporary Markdown files (`first.md`, `second.md`), `theme: Some("ice_cyan")`, `locale: Some("en_US")` -> opens both buffers in tabs with expected names/contents and sets `state.theme.name == "ice_cyan"`.
+       - Constructs a `TuiApp` (or `EditorState::new`) with `AppConfig { line_numbers: false, spell_enabled: false, ..AppConfig::default() }`, inserts `"hello wrld"`, renders on `TestBackend::new(80, 16)` -> `viewport.gutter_width == 0` and `active_analysis().1` (spell diagnostics) is empty.
+     - Add `custom_toml_theme_overrides_builtin_and_validates_names`:
+       - Writes a valid TOML theme overriding `crt_amber` (with a distinct background RGB such as `{ r = 1, g = 2, b = 3 }`) into `<temp>/themes/crt_amber.toml`, calls `scriptui_core::resolve_theme("crt_amber", &[themes_dir])` -> returns the custom theme's RGB rather than the built-in `#0A0A08`, and `resolve_theme("../escape", &[themes_dir])` returns `Err`.
+
+Must still work:
+  - All existing and `STEP 10B` tests in `crates/scriptui-tui/tests/tui_integration.rs` unchanged and passing.
+
+Drops: none
+
+Tests:
+  - `cli_version_matches_workspace_version`: `Cli::try_parse_from(["scriptui", "--version"])` -> matches `format!("scriptui {}", env!("CARGO_PKG_VERSION"))`.
+  - `cli_binary_version_help_and_dict_import_with_xdg_config_home`: real `scriptui` binary via `Command::new(env!("CARGO_BIN_EXE_scriptui"))` with isolated `XDG_CONFIG_HOME` -> `--version`, `--help`, valid `dict import`, and traversal rejection all behave as documented.
+  - `cli_startup_opens_multiple_files_and_overrides_config`: `TuiApp::from_cli` with 2 files + `--theme ice_cyan` -> 2 tabs loaded with `"ice_cyan"`; `line_numbers = false` + `spell_enabled = false` renders with `gutter_width == 0` and zero diagnostics.
+  - `custom_toml_theme_overrides_builtin_and_validates_names`: `resolve_theme("crt_amber", &[temp_themes_dir])` -> custom background RGB overrides built-in; `resolve_theme("../escape", ...)` -> `Err`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'CARGO_PKG_VERSION' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn cli_binary_version_help_and_dict_import_with_xdg_config_home' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn cli_startup_opens_multiple_files_and_overrides_config' crates/scriptui-tui/tests/tui_integration.rs && grep -qE 'fn custom_toml_theme_overrides_builtin_and_validates_names' crates/scriptui-tui/tests/tui_integration.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
