@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 8):** Local, gate-verifiable `v0.1.0` release prep, re-split from deferred 8A/8B: an MIT `LICENSE`, inherited Cargo release metadata and a tuned `[profile.release]` whose binary prints `scriptui 0.1.0` for `--version` (`STEP 8D`), then a `CHANGELOG.md` and README Installation / Releases / License sections (`STEP 8E`). GitHub workflows (deferred 8C) move to Phase 9.
+**Phase goal (Phase 9):** Fix the two open functional bugs before functional verification (`Phase 10`): preview markdown soft-break rendering in block quotes, lists, and paragraphs (`BUG-0012`, `STEP 9A`), and bundled `en_US` Hunspell dictionary coverage for contractions and standard English vocabulary (`BUG-0013`, `STEP 9B`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,8 +28,8 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 8D** | `/goal` | release | `LICENSE`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `crates/scriptui-tui/tests/tui_integration.rs` | — |
-| 2 | **STEP 8E** | `/goal` | docs | `CHANGELOG.md`, `README.md` | STEP 8D |
+| 1 | **STEP 9A** | `/goal` | preview | `crates/scriptui-core/src/preview.rs` | — |
+| 2 | **STEP 9B** | `/goal` | spell | `crates/scriptui-core/assets/dicts/en_US.aff`, `crates/scriptui-core/assets/dicts/en_US.dic`, `crates/scriptui-core/src/spell.rs` | — |
 
 ### Completed
 
@@ -75,6 +75,8 @@
 | **STEP 7A** | Done (`bac6c81`) | `/goal` | core | `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/editor.rs`, `crates/scriptui-tui/src/modals.rs` |
 | **STEP 7B** | Done (`2860be3`) | `/goal` | core | `crates/scriptui-core/src/layout.rs`, `crates/scriptui-core/src/lib.rs` |
 | **STEP 7C** | Done (`d6c1076`) | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs`, `crates/scriptui-tui/src/mouse.rs` |
+| **STEP 8D** | Done (`706671e`) | `/goal` | release | `LICENSE`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml`, `crates/scriptui-tui/tests/tui_integration.rs` |
+| **STEP 8E** | Done (`4b7b777`) | `/goal` | docs | `CHANGELOG.md`, `README.md` |
 
 ### Future phases
 
@@ -394,6 +396,112 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qx '# Changelog' CHANGELOG.md && grep -qx '## \[Unreleased\]' CHANGELOG.md && grep -qx '## \[0.1.0\] - 2026-11-22' CHANGELOG.md && grep -qx '### Added' CHANGELOG.md && grep -qx '## Installation' README.md && grep -qx '## Releases' README.md && grep -qx '## License' README.md && grep -qx 'cargo install --path crates/scriptui-tui --locked' README.md && grep -q '\[LICENSE\](LICENSE)' README.md && grep -q '\[CHANGELOG.md\](CHANGELOG.md)' README.md && test "$(grep '^## ' README.md | tail -n 1)" = '## License' && test "$(grep -n '^## ' README.md | grep -A1 '## Architecture' | tail -n 1 | cut -d: -f2)" = '## Installation'
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 9 Step Blocks
+
+### STEP 9A: Preview Markdown Soft-Break Line Rendering (`BUG-0012`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 9A: Render markdown soft breaks as line breaks in the live preview so Enter in block quotes, bullets, and paragraphs starts a new preview line (BUG-0012).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/preview.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/preview.rs:841-875 (collect_inline_node, SoftBreak, LineBreak)
+  - crates/scriptui-core/src/preview.rs:985-1012 (render_wrapped_tokens)
+  - crates/scriptui-core/src/preview.rs:645-660 (render_table HardBreak flattening)
+  - crates/scriptui-core/src/preview.rs:392-520 (render_blockquote, render_list)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify markdown.rs, indent.rs, or any TUI files.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pressing Enter in the editor inside block quotes, bullet/ordered lists, or paragraphs renders subsequent lines on separate preview lines with active prefixes preserved instead of collapsing onto the previous line.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/preview.rs` (`PreviewRenderer::collect_inline_node`):
+     - Emit `InlineToken::HardBreak` for `NodeValue::SoftBreak` (matching `NodeValue::LineBreak`) instead of a `" "` `StyledSegment`.
+     - Preserve `prefix_stack` across soft breaks (blockquote `"│ "` bars and list-item continuation indent) and keep `render_wrapped_tokens` source-line mapping (`base_source_line + break_idx`) monotonic.
+     - Table cell rendering (`render_table`) continues flattening `InlineToken::HardBreak` to a single space `" "`.
+
+Must still work:
+  - `preview_renders_tables_tasks_alerts_code_and_breaks` (explicit two-space hard breaks, GFM alerts, task lists, tables, code blocks).
+  - `preview_scroll_sync_maps_source_and_preview_lines` (monotonic `source_line_to_preview_line` and `preview_line_to_source_line` roundtrip).
+  - `full_gfm_document_highlights_previews_and_spellchecks` in `crates/scriptui-core/tests/markdown_spell_pipeline.rs`.
+
+Drops: none
+
+Tests:
+  - `preview_soft_break_in_blockquote_and_bullet_renders_on_new_lines`: call `build_preview("> first quote line\n> second quote line\n\n- bullet line one\n  bullet line two\n\nplain one\nplain two\n", &theme, 80)` -> `plain_lines()` places `"second quote line"` on a later line index than `"first quote line"` (both prefixed with `"│ "`), `"bullet line two"` on a later line index than `"bullet line one"` (with continuation indent rather than `"• "`), and `"plain two"` on a later line index than `"plain one"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn preview_soft_break_in_blockquote_and_bullet_renders_on_new_lines' crates/scriptui-core/src/preview.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 9B: Bundled `en_US` Hunspell Dictionary & Contraction Coverage (`BUG-0013`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 9B: Replace the stub en_US dictionary with the full standard en_US Hunspell dictionary and ensure contractions and standard English words pass spellcheck (BUG-0013).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/assets/dicts/en_US.aff
+  - crates/scriptui-core/assets/dicts/en_US.dic
+  - crates/scriptui-core/src/spell.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/spell.rs:11-12 (BUNDLED_EN_US_AFF, BUNDLED_EN_US_DIC)
+  - crates/scriptui-core/src/spell.rs:211-232 (SpellEngine::is_correct, suggest)
+  - crates/scriptui-core/src/spell.rs:234-340 (SpellEngine::check_document)
+  - crates/scriptui-core/src/spell.rs:387-393 (is_apostrophe, is_word_char)
+  - crates/scriptui-core/tests/markdown_spell_pipeline.rs:6-58
+  - crates/scriptui-core/tests/editor_state_pipeline.rs:76-115
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify Cargo.toml, Cargo.lock, or any TUI files.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: `SpellEngine::default_en_us()` uses a full standard `en_US` Hunspell dictionary so common English words, inflections, and contractions (including `"don't"`, `"emphasized"`, and `"cascade"`) are accepted while genuine misspellings like `"wrld"` and `"documnt"` are still flagged with suggestions.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/assets/dicts/en_US.aff` and `crates/scriptui-core/assets/dicts/en_US.dic`:
+     - Replace the 712-line stub dictionary with the full standard `en_US` Hunspell dictionary (sourced from `/usr/share/hunspell/en_US.aff` and `/usr/share/hunspell/en_US.dic`, normalized to UTF-8 LF line endings) so `spellbook::Dictionary::new(BUNDLED_EN_US_AFF, BUNDLED_EN_US_DIC)` loads cleanly.
+  2. `crates/scriptui-core/src/spell.rs`:
+     - `SpellEngine::is_correct`, `SpellEngine::suggest`, and `SpellEngine::check_document` must accept contractions with ASCII `'` and curly `\u{2019}` apostrophes (e.g., `"don't"`, `"don\u{2019}t"`, `"Don't"`), as well as `"emphasized"` and `"cascade"`, while preserving original byte/column spans in `SpellDiagnostic`. If `spellbook` does not fold `\u{2019}` via `ICONV`, normalize `\u{2019}` to `'` when querying the dictionary.
+
+Must still work:
+  - `default_en_us_flags_misspelling_and_suggests` (`"hello wrld"` flags `"wrld"` and suggests `"world"`).
+  - `spell_skips_code_ranges_and_respects_personal_and_ignore`.
+  - `import_and_load_custom_locale_and_reject_traversal`.
+  - `full_gfm_document_highlights_previews_and_spellchecks` (`"documnt"` flagged, `"document"` suggested).
+  - `soft_wrap_layout_spell_quick_fix_and_preview_sync`.
+
+Drops: none
+
+Tests:
+  - `default_en_us_accepts_contractions_and_standard_english_words`: `SpellEngine::default_en_us()` -> `check_document("I don't think you\u{2019}ve emphasized the cascade. Don't stop.", &[])` returns an empty `Vec`, and `is_correct("don't")`, `is_correct("don\u{2019}t")`, `is_correct("emphasized")`, `is_correct("cascade")` all return `true`, while `is_correct("wrld")` returns `false`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn default_en_us_accepts_contractions_and_standard_english_words' crates/scriptui-core/src/spell.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

@@ -8,7 +8,7 @@ created_at = "2026-11-22T00:11:11Z"
 [counters]
 bug = 13
 feature = 0
-task = 50
+task = 52
 
 [[phases.registry]]
 id = "pre_production"
@@ -55,4 +55,63 @@ flags = []
 files = [
     "scripts/neon-dispatch",
     "scripts/phased-step.sh",
+]
+
+[[components.registry]]
+id = "scriptui_core"
+name = "scriptui-core"
+relative_path = "crates/scriptui-core"
+component_type = "rust_crate"
+tech_stack = ["rust"]
+tags = []
+flags = []
+files = [
+    "crates/scriptui-core/Cargo.toml",
+    "crates/scriptui-core/assets/dicts/en_US.aff",
+    "crates/scriptui-core/assets/dicts/en_US.dic",
+    "crates/scriptui-core/src/buffer.rs",
+    "crates/scriptui-core/src/buffers.rs",
+    "crates/scriptui-core/src/config.rs",
+    "crates/scriptui-core/src/editor.rs",
+    "crates/scriptui-core/src/error.rs",
+    "crates/scriptui-core/src/highlight.rs",
+    "crates/scriptui-core/src/history.rs",
+    "crates/scriptui-core/src/indent.rs",
+    "crates/scriptui-core/src/keymap.rs",
+    "crates/scriptui-core/src/layout.rs",
+    "crates/scriptui-core/src/lib.rs",
+    "crates/scriptui-core/src/markdown.rs",
+    "crates/scriptui-core/src/preview.rs",
+    "crates/scriptui-core/src/search.rs",
+    "crates/scriptui-core/src/selection.rs",
+    "crates/scriptui-core/src/spell.rs",
+    "crates/scriptui-core/src/theme.rs",
+    "crates/scriptui-core/tests/editor_state_pipeline.rs",
+    "crates/scriptui-core/tests/markdown_spell_pipeline.rs",
+]
+
+[[components.registry]]
+id = "scriptui_tui"
+name = "scriptui-tui"
+relative_path = "crates/scriptui-tui"
+component_type = "rust_crate"
+tech_stack = ["rust"]
+tags = []
+flags = []
+files = [
+    "crates/scriptui-tui/Cargo.toml",
+    "crates/scriptui-tui/src/app.rs",
+    "crates/scriptui-tui/src/chrome.rs",
+    "crates/scriptui-tui/src/cli.rs",
+    "crates/scriptui-tui/src/find_bar.rs",
+    "crates/scriptui-tui/src/layout_tree.rs",
+    "crates/scriptui-tui/src/lib.rs",
+    "crates/scriptui-tui/src/main.rs",
+    "crates/scriptui-tui/src/modals.rs",
+    "crates/scriptui-tui/src/mouse.rs",
+    "crates/scriptui-tui/src/palette.rs",
+    "crates/scriptui-tui/src/preview_pane.rs",
+    "crates/scriptui-tui/src/terminal.rs",
+    "crates/scriptui-tui/src/viewport.rs",
+    "crates/scriptui-tui/tests/tui_integration.rs",
 ]
