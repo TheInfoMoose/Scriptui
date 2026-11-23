@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use clap::error::ErrorKind;
@@ -8,10 +9,14 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
-use scriptui_core::{builtin_theme_names, DocumentBuffer, OverlayMode, PreviewMode, SelectionSet};
+use scriptui_core::theme::DEFAULT_CRT_AMBER_TOML;
+use scriptui_core::{
+    builtin_theme_names, resolve_theme, AppConfig, DocumentBuffer, EditorState, OverlayMode,
+    PreviewMode, RgbColor, SelectionSet,
+};
 use scriptui_tui::{
     build_palette_entries, discover_installed_locales, execute_dict_import, handle_palette_key,
-    rgb_to_color, Cli, FindFocus, TuiApp,
+    rgb_to_color, Cli, FindBarState, FindFocus, MouseRouter, PreviewPaneState, TuiApp,
 };
 
 fn make_cli(theme: Option<&str>, locale: Option<&str>) -> Cli {
@@ -468,7 +473,10 @@ fn cli_version_matches_workspace_version() {
     let err = Cli::try_parse_from(["scriptui", "--version"])
         .expect_err("expected --version to exit with DisplayVersion");
     assert_eq!(err.kind(), ErrorKind::DisplayVersion);
-    assert_eq!(err.to_string().trim(), "scriptui 0.1.0");
+    assert_eq!(
+        err.to_string().trim(),
+        format!("scriptui {}", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 fn type_text(app: &mut TuiApp, text: &str) {
@@ -1073,4 +1081,209 @@ fn tui_narrow_viewport_and_long_lines_render_without_panic() {
         }
         press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     }
+}
+
+#[test]
+fn cli_binary_version_help_and_dict_import_with_xdg_config_home() {
+    let bin = env!("CARGO_BIN_EXE_scriptui");
+    let temp_xdg = tempfile::tempdir().expect("create temp XDG_CONFIG_HOME");
+
+    // 1. --version
+    let version_out = Command::new(bin)
+        .env("XDG_CONFIG_HOME", temp_xdg.path())
+        .arg("--version")
+        .output()
+        .expect("run scriptui --version");
+    assert!(
+        version_out.status.success(),
+        "expected --version to exit 0, stderr: {}",
+        String::from_utf8_lossy(&version_out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&version_out.stdout),
+        format!("scriptui {}\n", env!("CARGO_PKG_VERSION"))
+    );
+
+    // 2. --help
+    let help_out = Command::new(bin)
+        .env("XDG_CONFIG_HOME", temp_xdg.path())
+        .arg("--help")
+        .output()
+        .expect("run scriptui --help");
+    assert!(
+        help_out.status.success(),
+        "expected --help to exit 0, stderr: {}",
+        String::from_utf8_lossy(&help_out.stderr)
+    );
+    let help_stdout = String::from_utf8_lossy(&help_out.stdout);
+    assert!(
+        help_stdout.contains("--theme"),
+        "expected --help stdout to contain '--theme':\n{help_stdout}"
+    );
+    assert!(
+        help_stdout.contains("--locale"),
+        "expected --help stdout to contain '--locale':\n{help_stdout}"
+    );
+    assert!(
+        help_stdout.contains("dict"),
+        "expected --help stdout to contain 'dict':\n{help_stdout}"
+    );
+
+    // 3. dict import xx_CLI <dic> <aff>
+    let src_dir = tempfile::tempdir().expect("create temp dict source dir");
+    let dic_src = src_dir.path().join("xx_CLI.dic");
+    let aff_src = src_dir.path().join("xx_CLI.aff");
+    let dic_content = "2\nhello\nzorkle\n";
+    let aff_content = "SET UTF-8\n";
+    std::fs::write(&dic_src, dic_content).expect("write source .dic");
+    std::fs::write(&aff_src, aff_content).expect("write source .aff");
+
+    let import_out = Command::new(bin)
+        .env("XDG_CONFIG_HOME", temp_xdg.path())
+        .args(["dict", "import", "xx_CLI"])
+        .arg(&dic_src)
+        .arg(&aff_src)
+        .output()
+        .expect("run scriptui dict import xx_CLI");
+    assert!(
+        import_out.status.success(),
+        "expected valid dict import to exit 0, stderr: {}",
+        String::from_utf8_lossy(&import_out.stderr)
+    );
+    let import_stdout = String::from_utf8_lossy(&import_out.stdout);
+    assert!(
+        import_stdout.contains("Imported dictionary for 'xx_CLI'"),
+        "unexpected dict import stdout: {import_stdout}"
+    );
+
+    let dicts_dir = temp_xdg.path().join("scriptui").join("dicts");
+    let dic_dest = dicts_dir.join("xx_CLI.dic");
+    let aff_dest = dicts_dir.join("xx_CLI.aff");
+    assert!(dic_dest.is_file(), "expected imported .dic at {dic_dest:?}");
+    assert!(aff_dest.is_file(), "expected imported .aff at {aff_dest:?}");
+    assert_eq!(
+        std::fs::read_to_string(&dic_dest).expect("read imported .dic"),
+        dic_content
+    );
+    assert_eq!(
+        std::fs::read_to_string(&aff_dest).expect("read imported .aff"),
+        aff_content
+    );
+
+    // 4. dict import ../bad <dic> <aff> rejected
+    let bad_out = Command::new(bin)
+        .env("XDG_CONFIG_HOME", temp_xdg.path())
+        .args(["dict", "import", "../bad"])
+        .arg(&dic_src)
+        .arg(&aff_src)
+        .output()
+        .expect("run scriptui dict import ../bad");
+    assert!(
+        !bad_out.status.success(),
+        "expected traversal locale '../bad' to exit non-zero"
+    );
+    assert!(
+        !bad_out.stderr.is_empty(),
+        "expected non-empty stderr on invalid locale import"
+    );
+}
+
+#[test]
+fn cli_startup_opens_multiple_files_and_overrides_config() {
+    let dir = tempfile::tempdir().expect("create temp dir for multi-file startup");
+    let first_path = dir.path().join("first.md");
+    let second_path = dir.path().join("second.md");
+    std::fs::write(&first_path, "# First Document\n").expect("write first.md");
+    std::fs::write(&second_path, "# Second Document\n").expect("write second.md");
+
+    let cli = Cli {
+        command: None,
+        theme: Some("ice_cyan".to_string()),
+        locale: Some("en_US".to_string()),
+        files: vec![first_path.clone(), second_path.clone()],
+    };
+    let app = TuiApp::from_cli(&cli).expect("initialize TuiApp from CLI with two files");
+    assert_eq!(app.state.theme.name, "ice_cyan");
+    assert_eq!(app.state.config.spell_locale, "en_US");
+    assert_eq!(app.state.buffers.len(), 2);
+    assert_eq!(app.state.buffers.buffers()[0].display_name(), "first.md");
+    assert_eq!(
+        app.state.buffers.buffers()[0].document.text(),
+        "# First Document\n"
+    );
+    assert_eq!(app.state.buffers.buffers()[1].display_name(), "second.md");
+    assert_eq!(
+        app.state.buffers.buffers()[1].document.text(),
+        "# Second Document\n"
+    );
+
+    // Config-driven TUI rendering: line_numbers = false and spell_enabled = false.
+    let config = AppConfig {
+        line_numbers: false,
+        spell_enabled: false,
+        ..AppConfig::default()
+    };
+    let mut state = EditorState::new(config).expect("initialize EditorState with custom config");
+    state.insert_text("hello wrld");
+    let mut configured_app = TuiApp {
+        state,
+        mouse: MouseRouter::default(),
+        last_frame: None,
+        follow_cursor: true,
+        preview_pane: PreviewPaneState::default(),
+        find_bar: FindBarState::default(),
+        palette_entries: Vec::new(),
+    };
+
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| configured_app.render_frame(frame))
+        .expect("render configured app");
+
+    let viewport = configured_app
+        .last_frame
+        .as_ref()
+        .and_then(|frame| frame.viewport)
+        .expect("viewport metrics present");
+    assert_eq!(
+        viewport.gutter_width, 0,
+        "expected gutter_width == 0 when line_numbers is false"
+    );
+
+    let (_, diagnostics) = configured_app.state.active_analysis();
+    assert!(
+        diagnostics.is_empty(),
+        "expected empty spell diagnostics when spell_enabled is false, got {diagnostics:?}"
+    );
+}
+
+#[test]
+fn custom_toml_theme_overrides_builtin_and_validates_names() {
+    let temp = tempfile::tempdir().expect("create temp dir for custom themes");
+    let themes_dir = temp.path().join("themes");
+    std::fs::create_dir_all(&themes_dir).expect("create themes directory");
+
+    let custom_bg = RgbColor { r: 1, g: 2, b: 3 };
+    let builtin_bg_line = "background = { r = 10, g = 10, b = 8 }";
+    let custom_bg_line = "background = { r = 1, g = 2, b = 3 }";
+    assert!(
+        DEFAULT_CRT_AMBER_TOML.contains(builtin_bg_line),
+        "expected DEFAULT_CRT_AMBER_TOML to contain built-in background line"
+    );
+    let custom_toml = DEFAULT_CRT_AMBER_TOML.replace(builtin_bg_line, custom_bg_line);
+    std::fs::write(themes_dir.join("crt_amber.toml"), custom_toml)
+        .expect("write custom crt_amber.toml");
+
+    let resolved = resolve_theme("crt_amber", std::slice::from_ref(&themes_dir))
+        .expect("resolve overridden crt_amber theme");
+    assert_eq!(resolved.palette.background, custom_bg);
+    assert_ne!(resolved.palette.background, RgbColor { r: 10, g: 10, b: 8 });
+
+    let err = resolve_theme("../escape", std::slice::from_ref(&themes_dir))
+        .expect_err("expected path traversal theme name to fail");
+    assert!(
+        !err.to_string().is_empty(),
+        "expected non-empty error for invalid theme name"
+    );
 }
