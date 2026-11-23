@@ -3,14 +3,15 @@ use std::time::{Duration, Instant};
 
 use clap::error::ErrorKind;
 use clap::Parser;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
-use scriptui_core::{builtin_theme_names, DocumentBuffer, OverlayMode, PreviewMode};
+use scriptui_core::{builtin_theme_names, DocumentBuffer, OverlayMode, PreviewMode, SelectionSet};
 use scriptui_tui::{
     build_palette_entries, discover_installed_locales, execute_dict_import, handle_palette_key,
-    rgb_to_color, Cli, TuiApp,
+    rgb_to_color, Cli, FindFocus, TuiApp,
 };
 
 fn make_cli(theme: Option<&str>, locale: Option<&str>) -> Cli {
@@ -468,4 +469,608 @@ fn cli_version_matches_workspace_version() {
         .expect_err("expected --version to exit with DisplayVersion");
     assert_eq!(err.kind(), ErrorKind::DisplayVersion);
     assert_eq!(err.to_string().trim(), "scriptui 0.1.0");
+}
+
+fn type_text(app: &mut TuiApp, text: &str) {
+    for ch in text.chars() {
+        press_key(app, KeyCode::Char(ch), KeyModifiers::NONE);
+    }
+}
+
+fn press_key_with_clipboard(app: &mut TuiApp, code: KeyCode, modifiers: KeyModifiers) -> String {
+    let mut clipboard = Vec::new();
+    app.handle_key_event(KeyEvent::new(code, modifiers), &mut clipboard)
+        .expect("handle key event");
+    String::from_utf8(clipboard).expect("clipboard output should be valid utf-8")
+}
+
+fn rect_has_non_empty_cell(buf: &Buffer, rect: Rect) -> bool {
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            if !buf[(x, y)].symbol().trim().is_empty() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[test]
+fn tui_file_buffer_lifecycle_and_dirty_confirm_modals() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let first_path = dir.path().join("first.md");
+    let second_path = dir.path().join("second.md");
+    std::fs::write(&second_path, "second file body").expect("seed second file");
+
+    let mut app = TuiApp::from_cli(&make_cli(None, None)).expect("initialize app");
+    assert_eq!(app.state.buffers.len(), 1);
+    assert_eq!(app.state.buffers.active_index(), 0);
+
+    // Ctrl+N creates a new buffer and activates it.
+    press_key(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.len(), 2);
+    assert_eq!(app.state.buffers.active_index(), 1);
+
+    // Ctrl+PageUp / Ctrl+PageDown cycle tabs.
+    press_key(&mut app, KeyCode::PageUp, KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.active_index(), 0);
+    press_key(&mut app, KeyCode::PageDown, KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.active_index(), 1);
+
+    // Type content and Save As via Ctrl+Shift+S.
+    type_text(&mut app, "hello");
+    assert!(app.state.buffers.active().document.is_dirty());
+
+    press_key(
+        &mut app,
+        KeyCode::Char('S'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    assert_eq!(app.state.overlay, OverlayMode::SaveAsPrompt);
+    type_text(&mut app, first_path.to_str().expect("utf-8 first path"));
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert!(!app.state.buffers.active().document.is_dirty());
+    assert_eq!(
+        std::fs::read_to_string(&first_path).expect("read saved file"),
+        "hello"
+    );
+
+    // Further edit + Ctrl+S saves updated content directly.
+    type_text(&mut app, " world");
+    assert!(app.state.buffers.active().document.is_dirty());
+    press_key(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+    assert!(!app.state.buffers.active().document.is_dirty());
+    assert_eq!(
+        std::fs::read_to_string(&first_path).expect("read re-saved file"),
+        "hello world"
+    );
+
+    // Ctrl+O opens OpenFilePrompt and loads second temp file.
+    press_key(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::OpenFilePrompt);
+    type_text(&mut app, second_path.to_str().expect("utf-8 second path"));
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert_eq!(app.state.buffers.len(), 3);
+    assert_eq!(
+        app.state.buffers.active().document.text(),
+        "second file body"
+    );
+
+    // Dirty edit + Ctrl+W triggers ConfirmCloseBuffer; 'n' cancels, 'y' closes.
+    type_text(&mut app, "!");
+    assert!(app.state.buffers.active().document.is_dirty());
+    press_key(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::ConfirmCloseBuffer);
+
+    press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert_eq!(app.state.buffers.len(), 3);
+
+    press_key(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::ConfirmCloseBuffer);
+    press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert_eq!(app.state.buffers.len(), 2);
+
+    // Dirty edit + Ctrl+Q triggers ConfirmQuit; 'n' cancels, 'y' sets should_quit.
+    type_text(&mut app, "?");
+    assert!(app.state.buffers.active().document.is_dirty());
+    press_key(&mut app, KeyCode::Char('q'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::ConfirmQuit);
+    assert!(!app.state.should_quit);
+
+    press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert!(!app.state.should_quit);
+
+    press_key(&mut app, KeyCode::Char('q'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::ConfirmQuit);
+    press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+    assert!(app.state.should_quit);
+}
+
+#[test]
+fn tui_find_replace_bar_inline_shortcuts_and_f3_navigation() {
+    let mut app = TuiApp::from_cli(&make_cli(None, None)).expect("initialize app");
+    app.state.buffers.active_mut().document =
+        DocumentBuffer::from_str_content("foo Foo foobar foo");
+
+    // Ctrl+H opens Replace overlay with query focused.
+    press_key(&mut app, KeyCode::Char('h'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::Replace);
+    assert_eq!(app.find_bar.focus, FindFocus::Query);
+
+    type_text(&mut app, "foo");
+    assert_eq!(app.state.find_replace.matches.len(), 4);
+
+    // Alt+C toggles case-sensitive matching.
+    press_key(&mut app, KeyCode::Char('c'), KeyModifiers::ALT);
+    assert!(app.state.find_replace.query.case_sensitive);
+    assert_eq!(app.state.find_replace.matches.len(), 3);
+
+    // Alt+W toggles whole-word matching.
+    press_key(&mut app, KeyCode::Char('w'), KeyModifiers::ALT);
+    assert!(app.state.find_replace.query.whole_word);
+    assert_eq!(app.state.find_replace.matches.len(), 2);
+
+    // Alt+R toggles regex mode.
+    press_key(&mut app, KeyCode::Char('r'), KeyModifiers::ALT);
+    assert!(app.state.find_replace.query.use_regex);
+    assert_eq!(app.state.find_replace.matches.len(), 2);
+
+    // Toggle flags back off to restore all 4 matches.
+    press_key(&mut app, KeyCode::Char('r'), KeyModifiers::ALT);
+    press_key(&mut app, KeyCode::Char('w'), KeyModifiers::ALT);
+    press_key(&mut app, KeyCode::Char('c'), KeyModifiers::ALT);
+    assert!(!app.state.find_replace.query.use_regex);
+    assert!(!app.state.find_replace.query.whole_word);
+    assert!(!app.state.find_replace.query.case_sensitive);
+    assert_eq!(app.state.find_replace.matches.len(), 4);
+
+    // Enter advances through matches in Find focus; Shift+Enter returns to previous.
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(app.state.find_replace.active_match, Some(0));
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(app.state.find_replace.active_match, Some(1));
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::SHIFT);
+    assert_eq!(app.state.find_replace.active_match, Some(0));
+
+    // Tab / Shift+Tab switch focus between Find and Replace inputs.
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(app.find_bar.focus, FindFocus::Replacement);
+    press_key(&mut app, KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert_eq!(app.find_bar.focus, FindFocus::Query);
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(app.find_bar.focus, FindFocus::Replacement);
+
+    // Type replacement, Enter replaces active match, Ctrl+Enter replaces all remaining.
+    type_text(&mut app, "baz");
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        app.state.buffers.active().document.text(),
+        "baz Foo foobar foo"
+    );
+
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::CONTROL);
+    assert_eq!(
+        app.state.buffers.active().document.text(),
+        "baz baz bazbar baz"
+    );
+    assert!(app.state.find_replace.matches.is_empty());
+
+    // Esc closes the Replace bar.
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+
+    // Seed a Find query for "baz", close bar, then test F3 / Shift+F3 and Ctrl+Shift+L.
+    press_key(&mut app, KeyCode::Char('f'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.overlay, OverlayMode::Find);
+    for _ in 0..3 {
+        press_key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+    }
+    type_text(&mut app, "baz");
+    assert_eq!(app.state.find_replace.matches.len(), 4);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+
+    press_key(&mut app, KeyCode::F(3), KeyModifiers::NONE);
+    let first_f3 = app.state.find_replace.active_match;
+    press_key(&mut app, KeyCode::F(3), KeyModifiers::NONE);
+    let second_f3 = app.state.find_replace.active_match;
+    assert_ne!(second_f3, first_f3);
+
+    press_key(&mut app, KeyCode::F(3), KeyModifiers::SHIFT);
+    assert_eq!(app.state.find_replace.active_match, first_f3);
+
+    // Ctrl+Shift+L selects all occurrences as multi-cursors.
+    press_key(
+        &mut app,
+        KeyCode::Char('L'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    assert_eq!(app.state.buffers.active().document.selection().len(), 4);
+}
+
+#[test]
+fn tui_editing_selection_osc52_cut_copy_redo_and_bracketed_paste() {
+    let mut app = TuiApp::from_cli(&make_cli(None, None)).expect("initialize app");
+    app.state.insert_text("alpha beta");
+
+    // Ctrl+A selects all.
+    press_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.selected_text(), "alpha beta");
+
+    // Ctrl+C emits OSC 52 sequence without mutating text.
+    let copy_osc52 = press_key_with_clipboard(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(
+        copy_osc52.starts_with("\x1b]52;c;"),
+        "expected OSC 52 copy sequence, got {copy_osc52:?}"
+    );
+    assert_eq!(app.state.buffers.active().document.text(), "alpha beta");
+
+    // Ctrl+X emits OSC 52 sequence and deletes selection.
+    let cut_osc52 = press_key_with_clipboard(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    assert!(
+        cut_osc52.starts_with("\x1b]52;c;"),
+        "expected OSC 52 cut sequence, got {cut_osc52:?}"
+    );
+    assert_eq!(app.state.buffers.active().document.text(), "");
+
+    // Bracketed paste inserts normalized text.
+    app.handle_paste_event("one\r\ntwo")
+        .expect("handle paste event");
+    assert_eq!(app.state.buffers.active().document.text(), "one\ntwo");
+
+    // Ctrl+Z undoes, Ctrl+Y redoes, Ctrl+Z undoes, Ctrl+Shift+Z redoes.
+    press_key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.active().document.text(), "");
+
+    press_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.active().document.text(), "one\ntwo");
+
+    press_key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.active().document.text(), "");
+
+    press_key(
+        &mut app,
+        KeyCode::Char('Z'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    assert_eq!(app.state.buffers.active().document.text(), "one\ntwo");
+
+    // Shift+Right, Shift+End, Shift+Home extend selection.
+    press_key(&mut app, KeyCode::Home, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Right, KeyModifiers::SHIFT);
+    assert_eq!(app.state.selected_text(), "t");
+
+    press_key(&mut app, KeyCode::End, KeyModifiers::SHIFT);
+    assert_eq!(app.state.selected_text(), "two");
+
+    press_key(&mut app, KeyCode::End, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Home, KeyModifiers::SHIFT);
+    assert_eq!(app.state.selected_text(), "two");
+
+    // Alt+Z toggles config.soft_wrap.
+    let initial_wrap = app.state.config.soft_wrap;
+    press_key(&mut app, KeyCode::Char('z'), KeyModifiers::ALT);
+    assert_eq!(app.state.config.soft_wrap, !initial_wrap);
+    press_key(&mut app, KeyCode::Char('z'), KeyModifiers::ALT);
+    assert_eq!(app.state.config.soft_wrap, initial_wrap);
+
+    // Esc collapses multi-cursor back to 1.
+    app.state.buffers.active_mut().document = DocumentBuffer::from_str_content("x y x");
+    press_key(&mut app, KeyCode::Char('f'), KeyModifiers::CONTROL);
+    type_text(&mut app, "x");
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::ALT);
+    assert_eq!(app.state.buffers.active().document.selection().len(), 2);
+
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.state.buffers.active().document.selection().len(), 1);
+}
+
+#[test]
+fn tui_mouse_click_drag_tab_right_click_spell_and_split_divider() {
+    let mut app =
+        TuiApp::from_cli(&make_cli(Some("crt_amber"), None)).expect("initialize default app");
+    app.state.buffers.active_mut().document = DocumentBuffer::from_str_content("hello wrld");
+    press_key(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    press_key(&mut app, KeyCode::PageUp, KeyModifiers::CONTROL);
+    assert_eq!(app.state.buffers.len(), 2);
+    assert_eq!(app.state.buffers.active_index(), 0);
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| app.render_frame(frame))
+        .expect("render initial frame");
+
+    let text_area = app
+        .last_frame
+        .as_ref()
+        .and_then(|f| f.viewport)
+        .expect("viewport present")
+        .text_area;
+
+    // 1. Left-click inside editor moves caret.
+    let handled = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: text_area.x + 2,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("handle editor left click");
+    assert!(handled);
+    assert_eq!(
+        app.state
+            .buffers
+            .active()
+            .document
+            .selection()
+            .primary()
+            .head,
+        2
+    );
+    let _ = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: text_area.x + 2,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("handle mouse up");
+
+    // 2. Left-click + drag + up creates non-empty selection.
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: text_area.x + 1,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag start"));
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: text_area.x + 5,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag move"));
+    let _ = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: text_area.x + 5,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag end");
+    assert_eq!(app.state.selected_text(), "ello");
+
+    // 3. Right-click on "wrld" moves caret and opens SpellQuickFix; Esc closes it.
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: text_area.x + 7,
+            row: text_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("right click misspelled word"));
+    assert_eq!(
+        app.state
+            .buffers
+            .active()
+            .document
+            .selection()
+            .primary()
+            .head,
+        7
+    );
+    assert_eq!(app.state.overlay, OverlayMode::SpellQuickFix);
+    assert!(app.state.spell_popup.is_some());
+
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.state.overlay, OverlayMode::None);
+
+    // 4. Left-click on second tab hitbox switches active tab.
+    let second_tab_rect = app
+        .last_frame
+        .as_ref()
+        .expect("frame state")
+        .tab_hitboxes
+        .get(1)
+        .expect("second tab hitbox")
+        .rect;
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: second_tab_rect.x,
+            row: second_tab_rect.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("click second tab"));
+    assert_eq!(app.state.buffers.active_index(), 1);
+    let _ = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: second_tab_rect.x,
+            row: second_tab_rect.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("release second tab");
+
+    // 5. Left-click on preview edge tab opens PreviewMode::Split(_).
+    let edge_tab = app
+        .last_frame
+        .as_ref()
+        .and_then(|f| f.regions.preview_edge_tab)
+        .expect("preview edge tab present");
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: edge_tab.x,
+            row: edge_tab.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("click preview edge tab"));
+    assert!(matches!(app.state.preview_mode, PreviewMode::Split(_)));
+    let _ = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: edge_tab.x,
+            row: edge_tab.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("release preview edge tab");
+
+    // 6. Left-click + drag + up on split divider updates preview_split_percent clamped to 20..=80.
+    terminal
+        .draw(|frame| app.render_frame(frame))
+        .expect("render split frame");
+    let divider = app
+        .last_frame
+        .as_ref()
+        .and_then(|f| f.regions.split_divider)
+        .expect("split divider present");
+
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: divider.x,
+            row: divider.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("grab split divider"));
+
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 30,
+            row: divider.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag split divider to 70%"));
+    assert_eq!(app.state.config.preview_split_percent, 70);
+    assert_eq!(app.state.preview_mode, PreviewMode::Split(70));
+
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 5,
+            row: divider.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag split divider past upper clamp"));
+    assert_eq!(app.state.config.preview_split_percent, 80);
+
+    assert!(app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 95,
+            row: divider.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag split divider past lower clamp"));
+    assert_eq!(app.state.config.preview_split_percent, 20);
+
+    let _ = app
+        .handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 95,
+            row: divider.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("release split divider");
+}
+
+#[test]
+fn tui_narrow_viewport_and_long_lines_render_without_panic() {
+    let mut app =
+        TuiApp::from_cli(&make_cli(Some("crt_amber"), None)).expect("initialize default app");
+    let long_line = format!("{} wrld {}", "a".repeat(97), "b".repeat(97));
+    assert_eq!(long_line.chars().count(), 200);
+    app.state.buffers.active_mut().document = DocumentBuffer::from_str_content(&long_line);
+
+    let backend = TestBackend::new(40, 12);
+    let mut terminal = Terminal::new(backend).expect("create narrow test terminal");
+
+    for soft_wrap in [true, false] {
+        app.state.config.soft_wrap = soft_wrap;
+        app.state.overlay = OverlayMode::None;
+
+        // Base render without overlay.
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render narrow base frame");
+        {
+            let frame_state = app.last_frame.as_ref().expect("frame state");
+            let text_area = frame_state.viewport.expect("viewport").text_area;
+            assert!(
+                rect_has_non_empty_cell(terminal.backend().buffer(), text_area),
+                "expected non-empty viewport cells (soft_wrap={soft_wrap})"
+            );
+        }
+
+        // Overlay 1: Find bar.
+        press_key(&mut app, KeyCode::Char('f'), KeyModifiers::CONTROL);
+        assert_eq!(app.state.overlay, OverlayMode::Find);
+        app.state.find_replace.query.pattern.clear();
+        type_text(&mut app, "wrld");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render narrow find overlay");
+        {
+            let frame_state = app.last_frame.as_ref().expect("frame state");
+            let text_area = frame_state.viewport.expect("viewport").text_area;
+            let find_rect = frame_state.regions.find_bar.expect("find bar region");
+            let buf = terminal.backend().buffer();
+            assert!(rect_has_non_empty_cell(buf, text_area));
+            assert!(rect_has_non_empty_cell(buf, find_rect));
+        }
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+
+        // Overlay 2: CommandPalette.
+        press_key(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+        assert_eq!(app.state.overlay, OverlayMode::CommandPalette);
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render narrow command palette overlay");
+        {
+            let frame_state = app.last_frame.as_ref().expect("frame state");
+            let text_area = frame_state.viewport.expect("viewport").text_area;
+            let buf = terminal.backend().buffer();
+            assert!(rect_has_non_empty_cell(buf, text_area));
+            assert!(rect_has_non_empty_cell(buf, frame_state.total_area));
+        }
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+
+        // Overlay 3: SpellQuickFix on "wrld" (char offset 98..102).
+        app.state
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(99));
+        press_key(&mut app, KeyCode::Char('.'), KeyModifiers::CONTROL);
+        assert_eq!(app.state.overlay, OverlayMode::SpellQuickFix);
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render narrow spell quick-fix overlay");
+        {
+            let frame_state = app.last_frame.as_ref().expect("frame state");
+            let text_area = frame_state.viewport.expect("viewport").text_area;
+            let buf = terminal.backend().buffer();
+            assert!(rect_has_non_empty_cell(buf, text_area));
+            let rendered = buffer_text(buf);
+            assert!(
+                rendered.contains("wrld"),
+                "expected spell quick-fix overlay to render 'wrld' in:\n{rendered}"
+            );
+        }
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    }
 }
