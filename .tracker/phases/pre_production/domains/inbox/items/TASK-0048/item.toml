@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0048"
 type = "task"
 title = "Version test hardcodes scriptui 0.1.0 instead of reading CARGO_PKG_VERSION"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-22T23:02:50Z"
-updated_at = "2026-11-22T23:02:50Z"
+updated_at = "2026-11-23T03:17:19Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "bd7fa5c"
+summary = "Updated cli_version_matches_workspace_version to read CARGO_PKG_VERSION in STEP 10C (26bed7f)."

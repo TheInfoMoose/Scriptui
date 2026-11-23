@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0053"
 type = "task"
 title = "Add unit test for SpellEngine::suggest with curly apostrophe"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-23T02:23:17Z"
-updated_at = "2026-11-23T02:23:25Z"
+updated_at = "2026-11-23T03:17:19Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-23"
+commit = "bd7fa5c"
+summary = "Added default_en_us_suggests_for_curly_apostrophe_misspelling in STEP 10A (511824c)."
