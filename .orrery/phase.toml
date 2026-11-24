@@ -1,11 +1,27 @@
 # Written by phased-step.sh new-phase from the plan's Up Next table.
 # Regenerated every phase; edits here are lost.
-phase = "11"
+phase = "12"
 
 [[queue]]
-step = "11A"
-item = "TASK-0060"
+step = "12A"
+item = "TASK-0065"
 
 [[queue]]
-user = "11B"
-title = "Multiagent read-only codebase audit & report"
+step = "12B"
+item = "TASK-0066"
+
+[[queue]]
+step = "12C"
+item = "TASK-0067"
+
+[[queue]]
+step = "12D"
+item = "TASK-0068"
+
+[[queue]]
+step = "12E"
+item = "TASK-0069"
+
+[[queue]]
+step = "12F"
+item = "TASK-0070"

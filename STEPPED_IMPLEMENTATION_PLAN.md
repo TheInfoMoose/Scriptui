@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 11):** Establish automated dependency security/license enforcement (`deny.toml` + `cargo deny check`, `STEP 11A`) and complete a read-only whole-codebase multiagent audit (`[USER] 11B`) covering security/robustness, correctness, performance, dependency licenses/advisories, and code quality, recording rated findings in `docs/codebase-audit-report.md` and filing every finding as a pending `neb` item for Phase 12.
+**Phase goal (Phase 12):** Resolve all Critical and High audit blockers plus deferred `STEP 11A` (`BUG-0017`–`BUG-0025`, `TASK-0060`–`TASK-0062`): enforce `deny.toml` + third-party license notices + workspace metadata, fix the UTF-8 task-list panic and atomic `O_EXCL` file I/O, track undo clean-point `dirty` state, wire internal `Ctrl+V` clipboard, wire startup config/locale/custom-theme/new-file/key-repeat handling, cache `SyntaxSet` and `PreviewDocument`, and add Unix signal handling with proper alt-screen exit error ordering.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,8 +28,12 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 11A** | `/goal` | tooling | `deny.toml` | — |
-| 2 | **[USER] 11B** | `/teamwork` | Multiagent read-only codebase audit & report | `docs/codebase-audit-report.md` | STEP 11A |
+| 1 | **STEP 12A** | `/goal` | tooling | `deny.toml`, `THIRD_PARTY_LICENSES.md`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml` | — |
+| 2 | **STEP 12B** | `/goal` | core | `crates/scriptui-core/src/indent.rs`, `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/spell.rs` | — |
+| 3 | **STEP 12C** | `/goal` | core | `crates/scriptui-core/src/history.rs`, `crates/scriptui-core/src/editor.rs`, `crates/scriptui-tui/src/modals.rs` | — |
+| 4 | **STEP 12D** | `/goal` | tui | `crates/scriptui-core/src/buffers.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/palette.rs` | STEP 12B, STEP 12C |
+| 5 | **STEP 12E** | `/goal` | perf | `crates/scriptui-core/src/highlight.rs`, `crates/scriptui-tui/src/preview_pane.rs` | — |
+| 6 | **STEP 12F** | `/goal` | tui | `crates/scriptui-tui/Cargo.toml`, `Cargo.lock`, `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/main.rs` | STEP 12A, STEP 12D |
 
 ### Completed
 
@@ -82,6 +86,7 @@
 | **STEP 10A** | Done (`511824c`) | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/tests/editor_state_pipeline.rs` |
 | **STEP 10B** | Done (`ec1a9ee`) | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` |
 | **STEP 10C** | Done (`26bed7f`) | `/goal` | cli | `crates/scriptui-tui/tests/tui_integration.rs` |
+| **[USER] 11B** | Done (`25892eb`) | `/teamwork` | audit | `docs/codebase-audit-report.md` |
 
 ### Future phases
 
@@ -132,7 +137,7 @@
 ### Parked
 
 Tracked in neb: `neb list --status pending`. Reviewed at phase end; only picked items become steps.
-_None — all tracked tasks and bugs are closed._
+Medium and low audit findings (`BUG-0014`–`BUG-0016`, `BUG-0026`–`BUG-0033`, `TASK-0049`, `TASK-0057`–`TASK-0059`, `TASK-0064`) remain pending in `neb` for post-Phase-12 triage.
 
 ---
 
@@ -744,6 +749,384 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo deny check && grep -qE 'RUSTSEC-2025-0141' deny.toml && grep -qE 'RUSTSEC-2024-0436' deny.toml && grep -qE 'RUSTSEC-2024-0320' deny.toml && grep -qE '"MPL-2.0"' deny.toml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 12 Step Blocks
+
+### STEP 12A: `deny.toml`, Workspace Release Metadata & Third-Party License Notice (`TASK-0060`, `TASK-0061`, `TASK-0062`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12A: Add workspace `deny.toml`, `THIRD_PARTY_LICENSES.md`, `repository`/`rust-version` metadata, and pinned `scriptui-core` version in `scriptui-tui/Cargo.toml` so `cargo deny check` passes cleanly (re-split of deferred STEP 11A).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - deny.toml (NEW)
+  - THIRD_PARTY_LICENSES.md (NEW)
+  - Cargo.toml
+  - crates/scriptui-core/Cargo.toml
+  - crates/scriptui-tui/Cargo.toml
+READ_ONLY_REFS:
+  - Cargo.toml:1-18 (workspace.package)
+  - crates/scriptui-core/Cargo.toml:1-23
+  - crates/scriptui-tui/Cargo.toml:1-22 (scriptui-core path dep on line 16)
+  - LICENSE:1-21
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT modify `Cargo.lock`, any Rust source files, or `docs/*`. Do NOT globally disable `unmaintained`, `unsound`, or `yanked` advisory checks.
+
+[PRE_GATE]
+command -v cargo-deny >/dev/null
+
+[MUTATION_SPEC]
+Goal: `cargo deny check` passes with zero errors at the workspace root, both crates inherit `repository` and `rust-version`, and third-party license attributions for bundled dictionaries and `spellbook` (`MPL-2.0`) are documented in `THIRD_PARTY_LICENSES.md`.
+
+Contract & Behavior:
+  1. `Cargo.toml` `[workspace.package]`: keep all existing keys unchanged; add:
+     - `repository = "https://github.com/TheInfoMoose/Scriptui"`
+     - `rust-version = "1.80"`
+  2. `crates/scriptui-core/Cargo.toml` and `crates/scriptui-tui/Cargo.toml` `[package]`: keep existing keys; add `repository.workspace = true` and `rust-version.workspace = true`.
+  3. `crates/scriptui-tui/Cargo.toml` `[dependencies]`: update `scriptui-core` to `{ version = "0.1.0", path = "../scriptui-core" }` so `cargo-deny` wildcard checks pass.
+  4. `deny.toml` (cargo-deny v2 schema compatible with `cargo-deny 0.20+`):
+     - `[graph]`: `targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]`, `all-features = true`.
+     - `[advisories]`: keep vulnerability, unsound, and yanked checks at default strictness; ignore only the three unmaintained transitive advisories with explicit `reason` strings naming their crate chains: `RUSTSEC-2025-0141` (`bincode 1.3.3` via `syntect 5.3.0`), `RUSTSEC-2024-0436` (`paste 1.0.15` via `ratatui 0.29.0`), `RUSTSEC-2024-0320` (`yaml-rust 0.4.5` via `syntect 5.3.0`).
+     - `[licenses]`: `confidence-threshold = 0.8`; allow only `"MIT"`, `"Apache-2.0"`, `"Apache-2.0 WITH LLVM-exception"`, `"BSD-2-Clause"`, `"BSD-3-Clause"`, `"0BSD"`, `"BSL-1.0"`, `"Zlib"`, `"Unlicense"`, `"Unicode-3.0"`, and `"MPL-2.0"` (comment noting `spellbook` file-level weak copyleft).
+     - `[bans]`: `multiple-versions = "warn"`, `wildcards = "deny"`, `highlight = "all"`.
+     - `[sources]`: `unknown-registry = "deny"`, `unknown-git = "deny"`, `allow-registry = ["https://github.com/rust-lang/crates.io-index"]`, `allow-git = []`.
+  5. `THIRD_PARTY_LICENSES.md` (new, repo root):
+     - Document third-party notices for:
+       - `crates/scriptui-core/assets/dicts/en_US.aff` and `en_US.dic` (SCOWL / Hunspell `en_US` English dictionary, BSD/MIT-style permissive copyright notice).
+       - `spellbook` crate (`MPL-2.0`, Mozilla Public License 2.0, file-level weak copyleft).
+     - Must not contain local host filesystem paths.
+
+Must still work:
+  - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` pass unchanged.
+  - `Cargo.lock` remains unchanged.
+
+Drops: none
+
+Tests:
+  - `cargo deny check`: executed at workspace root against `Cargo.lock` -> exits `0` with zero unapproved licenses, zero wildcard errors, zero disallowed sources, and zero unacknowledged advisories.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo deny check && test -f THIRD_PARTY_LICENSES.md && grep -qE 'MPL-2\.0' THIRD_PARTY_LICENSES.md && grep -qE 'en_US' THIRD_PARTY_LICENSES.md && grep -qE '^rust-version = "1\.80"' Cargo.toml && grep -qE '^repository = "https://github\.com/TheInfoMoose/Scriptui"' Cargo.toml && grep -qE 'scriptui-core = \{ version = "0\.1\.0", path = "\.\./scriptui-core" \}' crates/scriptui-tui/Cargo.toml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12B: UTF-8 Safe Task-List Parsing, `O_EXCL` Atomic File I/O & Buffer Helpers (`BUG-0017`, `BUG-0020` part 1, `BUG-0025`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12B: Fix UTF-8 slice panic in `indent::parse_task_list`, enforce `O_EXCL` unique temp files in atomic saves and locale import, guard no-op `apply_insert` dirtying, and add `DocumentBuffer::empty_with_path`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/indent.rs
+  - crates/scriptui-core/src/buffer.rs
+  - crates/scriptui-core/src/spell.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/indent.rs:74-96 (parse_task_list)
+  - crates/scriptui-core/src/buffer.rs:38-145,268-288 (empty, save_atomic, apply_insert)
+  - crates/scriptui-core/src/spell.rs:59-110,355-396 (PersonalDictionary::save_to_file, import_locale_files)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT add new external crates or change existing public method signatures.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Multi-byte UTF-8 lines never panic on Enter, atomic saves and dictionary imports create unique temp files with `O_EXCL` (`create_new(true)`) so symlinks/collisions cannot be overwritten, empty no-op inserts leave `dirty` unchanged, and `DocumentBuffer::empty_with_path` constructs a clean named buffer.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/indent.rs` (`parse_task_list`):
+     - Never slice `&trimmed[1..6]` without checking UTF-8 char boundaries or using safe prefix matching (e.g., `trimmed[1..].strip_prefix(" [ ] ")` / `" [x] "` / `" [X] "`).
+     - Lines where a multi-byte UTF-8 character straddles byte offset 6 (e.g., `"-    é"`, `"- é"`, `"*  日本語"`) must not panic and must fall through to normal unordered-bullet or plain-newline handling.
+  2. `crates/scriptui-core/src/buffer.rs`:
+     - Add `pub fn empty_with_path(path: PathBuf) -> Self`: creates an empty buffer with `path: Some(path)`, `dirty: false`, `last_disk_mtime: None`, `selection: SelectionSet::point(0)`, `revision: 0`, and a fresh `doc_id`.
+     - `DocumentBuffer::apply_insert`: set `self.dirty = true` and increment `self.revision` ONLY when at least one edit actually changed content (`edit.start < edit.end || !text.is_empty()`). A no-op insert (`""` with point cursor(s)) leaves `dirty` and `revision` unchanged.
+     - `DocumentBuffer::save_atomic`: create the sibling temp file using `OpenOptions::new().write(true).create_new(true)` (`O_EXCL`) with a unique name combining PID and a monotonic atomic counter (retrying on `ErrorKind::AlreadyExists` up to a bounded retry limit before returning `ScriptuiError::Io`). Remove the temp file on write/sync/rename error.
+  3. `crates/scriptui-core/src/spell.rs`:
+     - `PersonalDictionary::save_to_file`: use `OpenOptions::new().write(true).create_new(true)` (`O_EXCL`) with a unique temp filename (PID + atomic counter, bounded retry on `AlreadyExists`), `flush` + `sync_all`, and atomic `fs::rename`, cleaning up the temp file on error.
+     - `import_locale_files`: write both `{locale}.dic` and `{locale}.aff` via `O_EXCL` unique temp files in `dest_dir` (`flush` + `sync_all`) before renaming into place; clean up any temp files on failure so partial/corrupted files are not left behind.
+
+Must still work:
+  - All existing `indent.rs`, `buffer.rs`, and `spell.rs` unit tests (including task list continuation, empty task list clearing, `save_atomic`, `PersonalDictionary::save_to_file`, and `import_locale_files`).
+
+Drops: none
+
+Tests:
+  - `task_list_multibyte_utf8_at_byte_six_does_not_panic` (in `indent.rs`): `compute_enter_outcome("-    é", IndentConfig::default(), true)` and `compute_enter_outcome("-   é", IndentConfig::default(), true)` -> does not panic and returns `EnterOutcome::Insert("\n- ".to_string())`.
+  - `empty_insert_does_not_mark_buffer_dirty_and_empty_with_path_is_clean` (in `buffer.rs`): `DocumentBuffer::empty_with_path(PathBuf::from("new.md"))` -> `is_dirty() == false`, `path() == Some(Path::new("new.md"))`, and `apply_insert("")` with point selection keeps `is_dirty() == false` and `revision() == 0`.
+  - `save_atomic_skips_preexisting_temp_collision_with_o_excl` (in `buffer.rs`): `save_atomic()` writes target content cleanly even if a stale `.scriptui.tmp.*` file exists in the same directory, leaving no leftover temp files.
+  - `personal_dict_and_locale_import_use_atomic_o_excl_writes` (in `spell.rs`): `PersonalDictionary::save_to_file` and `import_locale_files` succeed cleanly into a temp directory and leave no leftover `.tmp` files behind.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn empty_with_path' crates/scriptui-core/src/buffer.rs && grep -qE 'create_new\(true\)' crates/scriptui-core/src/buffer.rs && grep -qE 'create_new\(true\)' crates/scriptui-core/src/spell.rs && grep -qE 'fn task_list_multibyte_utf8_at_byte_six_does_not_panic' crates/scriptui-core/src/indent.rs && grep -qE 'fn empty_insert_does_not_mark_buffer_dirty_and_empty_with_path_is_clean' crates/scriptui-core/src/buffer.rs && grep -qE 'fn personal_dict_and_locale_import_use_atomic_o_excl_writes' crates/scriptui-core/src/spell.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12C: Clean-Point Undo `dirty` Tracking, Internal `Ctrl+V` Clipboard & `EditorState::new_with_dirs` (`BUG-0019`, `BUG-0020` part 2, `BUG-0018` core)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12C: Track clean-point save depth in `UndoStack` (wired into Save/SaveAs), implement internal clipboard for `Action::Copy`/`Cut`/`Paste`, and add `EditorState::new_with_dirs` for custom themes and spell locales.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/history.rs
+  - crates/scriptui-core/src/editor.rs
+  - crates/scriptui-tui/src/modals.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/history.rs:12-80 (UndoStack)
+  - crates/scriptui-core/src/editor.rs:225-275,619-649,719-733 (EditorState::new, Save, Undo/Redo, Cut/Copy/Paste)
+  - crates/scriptui-core/src/buffer.rs:165-172 (is_dirty, set_dirty)
+  - crates/scriptui-core/src/theme.rs:306-330 (resolve_theme)
+  - crates/scriptui-core/src/spell.rs:195-215 (SpellEngine::load_locale)
+  - crates/scriptui-tui/src/modals.rs:285-307 (SaveAsPrompt Enter)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT break `EditorState::new(config)` or existing `UndoStack` method signatures.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Undoing back to the initial or last-saved state clears `DocumentBuffer::is_dirty()`, `Action::Copy`/`Cut`/`Paste` work through an internal editor clipboard, and `EditorState::new_with_dirs` resolves custom themes and non-default spell locales from configured directories with visible fallback warnings.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/history.rs` (`UndoStack`):
+     - Track the saved stack depth (`saved_depth: Option<usize>`, initialized to `Some(0)` in `UndoStack::new` and reset to `Some(0)` in `UndoStack::clear`).
+     - Add `pub fn mark_saved(&mut self)` (sets `saved_depth = Some(self.undo_entries.len())`) and `pub fn is_at_saved_state(&self) -> bool` (returns `self.saved_depth == Some(self.undo_entries.len())`).
+     - In `record`: if `saved_depth` is `Some(d)` and `d > self.undo_entries.len()` (branching after undoing past the saved point), set `saved_depth = None`. When `undo_entries.len() > self.max_entries` evicts index 0, decrement `saved_depth` by 1 if `d > 0`, or set `saved_depth = None` if `d == 0`.
+     - In `undo` and `redo`: after applying raw edits and restoring selection, call `buf.set_dirty(!self.is_at_saved_state())`.
+  2. `crates/scriptui-core/src/editor.rs` (`EditorState`):
+     - Add `pub fn new_with_dirs(config: AppConfig, theme_dirs: &[PathBuf], dict_dirs: &[PathBuf]) -> ScriptuiResult<Self>`:
+       - Resolve `config.theme` via `resolve_theme(&config.theme, theme_dirs)`. On `Err`, fall back to `default_theme()?` and record a non-fatal warning in `status_message` naming the missing/invalid theme.
+       - When `config.spell_enabled` is `true`, if `config.spell_locale.is_empty()` or `config.spell_locale == "en_US"`, load `SpellEngine::default_en_us().ok()`; otherwise call `SpellEngine::load_locale(&config.spell_locale, dict_dirs)` and on `Err`, fall back to `SpellEngine::default_en_us().ok()` while recording a non-fatal warning in `status_message` naming the locale.
+     - Keep `pub fn new(config: AppConfig) -> ScriptuiResult<Self>` delegating to `Self::new_with_dirs(config, &[], &[])`.
+     - Add internal clipboard storage on `EditorState` with `pub fn clipboard(&self) -> &str` and `pub fn set_clipboard(&mut self, text: impl Into<String>)`.
+     - In `EditorState::dispatch`:
+       - `Action::Save`: after `save_atomic()?`, call `active.history.mark_saved()`.
+       - `Action::Copy`: if `self.selected_text()` is non-empty, store it in `self.clipboard`.
+       - `Action::Cut`: if `self.selected_text()` is non-empty, store it in `self.clipboard` before calling `self.handle_delete(true)`.
+       - `Action::Paste`: if `!self.clipboard.is_empty()`, clone and insert it via `self.insert_text(&text)`.
+  3. `crates/scriptui-tui/src/modals.rs` (`handle_file_prompt_key`):
+     - In `OverlayMode::SaveAsPrompt` `KeyCode::Enter`: after `save_as_atomic(...)` succeeds, call `active.history.mark_saved()`.
+
+Must still work:
+  - All existing `history.rs`, `editor.rs`, `modals.rs`, and `tui_integration.rs` tests.
+  - `EditorState::new(config)` behavior for built-in themes and `en_US` spellcheck.
+
+Drops: none
+
+Tests:
+  - `undo_back_to_initial_or_saved_state_clears_dirty_flag` (in `history.rs`): edit -> `is_dirty() == true` -> `undo()` -> `is_dirty() == false` -> `redo()` -> `is_dirty() == true`; then `mark_saved()` + `buf.set_dirty(false)` -> second edit -> `is_dirty() == true` -> `undo()` -> `is_dirty() == false`; undoing past saved point and recording a new edit makes `is_at_saved_state() == false`.
+  - `editor_copy_cut_and_paste_roundtrip_via_internal_clipboard` (in `editor.rs`): insert `"hello world"`, select `"hello"`, `dispatch(Action::Copy)`, move to end, `dispatch(Action::Paste)` -> `"hello worldhello"`; select `"world"`, `dispatch(Action::Cut)`, `dispatch(Action::Paste)` -> restores `"world"` and records undoable transactions.
+  - `editor_new_with_dirs_loads_custom_theme_and_locale_or_warns` (in `editor.rs`): temp theme TOML and temp locale `.dic`/`.aff` in `theme_dirs`/`dict_dirs` -> `EditorState::new_with_dirs` loads both without warnings; unknown theme/locale falls back to defaults and sets `status_message.is_some()`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn mark_saved' crates/scriptui-core/src/history.rs && grep -qE 'pub fn new_with_dirs' crates/scriptui-core/src/editor.rs && grep -qE 'pub fn clipboard' crates/scriptui-core/src/editor.rs && grep -qE 'mark_saved\(\)' crates/scriptui-tui/src/modals.rs && grep -qE 'fn undo_back_to_initial_or_saved_state_clears_dirty_flag' crates/scriptui-core/src/history.rs && grep -qE 'fn editor_copy_cut_and_paste_roundtrip_via_internal_clipboard' crates/scriptui-core/src/editor.rs && grep -qE 'fn editor_new_with_dirs_loads_custom_theme_and_locale_or_warns' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12D: Startup Config/Theme/Locale Wiring, CLI New-File Creation, Custom-Theme Palette & `KeyEventKind::Repeat` (`BUG-0018`, `BUG-0019` TUI, `BUG-0021`, `BUG-0022`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12D: Wire TuiApp startup to load custom themes/locales and warn on bad config.toml, open non-existent CLI paths as clean named buffers, list custom themes in CommandPalette, accept `KeyEventKind::Repeat`, and forward `Action::Copy` to `EditorState`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/buffers.rs
+  - crates/scriptui-tui/src/app.rs
+  - crates/scriptui-tui/src/palette.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/buffers.rs:106-152 (BufferManager::open_file)
+  - crates/scriptui-core/src/buffer.rs:38-65 (DocumentBuffer::empty_with_path)
+  - crates/scriptui-core/src/editor.rs:245-275 (EditorState::new_with_dirs)
+  - crates/scriptui-tui/src/app.rs:65-100,172-268 (from_cli, refresh_palette_entries, handle_key_event)
+  - crates/scriptui-tui/src/palette.rs:30-105 (discover_installed_locales, build_palette_entries)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT break `BufferManager::open_file` or `build_palette_entries(extra_locales)` signatures.
+
+[PRE_GATE]
+grep -qE 'pub fn empty_with_path' crates/scriptui-core/src/buffer.rs && grep -qE 'pub fn new_with_dirs' crates/scriptui-core/src/editor.rs
+
+[MUTATION_SPEC]
+Goal: Launching `scriptui` with a non-existent file creates a clean named buffer ready to save, `--theme`/`--locale` and `config.toml` resolve custom themes/dictionaries and surface config parse warnings, custom themes appear in the command palette, held keys (`KeyEventKind::Repeat`) repeat normally, and `Ctrl+C` + `Ctrl+V` works end-to-end in `TuiApp`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/buffers.rs` (`BufferManager`):
+     - Add `pub fn open_or_create_file(&mut self, path: &Path) -> ScriptuiResult<BufferId>`:
+       - Calls `self.open_file(path)`; if that returns `Err(ScriptuiError::Io { source, .. })` with `source.kind() == io::ErrorKind::NotFound`, creates a clean `DocumentBuffer::empty_with_path(path.to_path_buf())`, reusing the initial empty untitled buffer if appropriate (matching `open_file`'s `replace_initial` rule) and deduplicating against any already-open buffer with the same `path`.
+       - Non-`NotFound` I/O errors (e.g., permission denied, directory path) still return `Err`.
+  2. `crates/scriptui-tui/src/palette.rs`:
+     - Add `pub fn discover_custom_themes(theme_dirs: &[PathBuf]) -> Vec<String>`: scans `theme_dirs` for valid `*.toml` files (stem passes safe theme identifier rules, sorted and deduplicated).
+     - Add `pub fn build_palette_entries_with_themes(extra_themes: &[String], extra_locales: &[String]) -> Vec<PaletteEntry>`: includes all built-in themes plus any non-duplicate `extra_themes` as `PaletteItemKind::Theme(name)` entries (`id: format!("theme.{name}")`, `label: format!("Theme: {name}")`).
+     - Keep `pub fn build_palette_entries(extra_locales: &[String]) -> Vec<PaletteEntry>` delegating to `build_palette_entries_with_themes(&[], extra_locales)`.
+  3. `crates/scriptui-tui/src/app.rs` (`TuiApp`):
+     - `TuiApp::from_cli`:
+       - Compute `config_dir = AppConfig::default_config_dir()`, `theme_dirs = [config_dir.join("themes")]`, `dict_dirs = [config_dir.join("dicts")]`.
+       - Load `config_path = config_dir.join("config.toml")` via `AppConfig::load_or_default(&config_path)`. On `Err(err)`, fall back to `AppConfig::default()` and preserve a visible warning string (`format!("Config error ({}): {err}", config_path.display())`) to store in `state.status_message` (joining with any theme/locale warning if both occur).
+       - Initialize `EditorState::new_with_dirs(config, &theme_dirs, &dict_dirs)?`.
+       - Open each path in `&cli.files` via `state.buffers.open_or_create_file(path)?`.
+     - `TuiApp::refresh_palette_entries`: discover custom themes from `config_dir.join("themes")` alongside locales from `config_dir.join("dicts")` and call `build_palette_entries_with_themes(&custom_themes, &locales)`.
+     - `TuiApp::handle_key_event`:
+       - Accept `KeyEventKind::Press | KeyEventKind::Repeat` (return `Ok(())` only for `KeyEventKind::Release` / other kinds).
+       - In the `Action::Copy` match arm, call `self.state.dispatch(Action::Copy)?;` in addition to emitting OSC 52 so `Ctrl+C` populates the internal clipboard for `Ctrl+V`.
+
+Must still work:
+  - All existing `buffers.rs`, `palette.rs`, `app.rs`, and `tui_integration.rs` tests (including OSC 52 copy/cut, CLI startup with existing files, and `KeyEventKind::Release` being ignored).
+
+Drops: none
+
+Tests:
+  - `open_or_create_file_creates_clean_named_buffer_for_missing_path` (in `buffers.rs`): `BufferManager::open_or_create_file(&nonexistent_path)` -> succeeds, replaces initial empty untitled tab, `is_dirty() == false`, `path() == Some(&nonexistent_path)`, and second call with same path deduplicates to the same `BufferId`.
+  - `discover_custom_themes_and_palette_entries_include_custom_toml` (in `palette.rs`): temp dir with `solarized.toml` -> `discover_custom_themes` returns `["solarized"]` and `build_palette_entries_with_themes` contains `PaletteItemKind::Theme("solarized")`.
+  - `tui_app_handles_repeat_keys_ctrl_c_v_and_nonexistent_cli_file` (in `app.rs`): `TuiApp::from_cli` with a non-existent temp file path succeeds with a clean named buffer; sending `KeyEventKind::Repeat` character `'a'` inserts `'a'` while `KeyEventKind::Release` is ignored; `Ctrl+A` + `Ctrl+C` + `End` + `Ctrl+V` duplicates the text and emits OSC 52.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'pub fn open_or_create_file' crates/scriptui-core/src/buffers.rs && grep -qE 'pub fn discover_custom_themes' crates/scriptui-tui/src/palette.rs && grep -qE 'pub fn build_palette_entries_with_themes' crates/scriptui-tui/src/palette.rs && grep -qE 'KeyEventKind::Repeat' crates/scriptui-tui/src/app.rs && grep -qE 'fn open_or_create_file_creates_clean_named_buffer_for_missing_path' crates/scriptui-core/src/buffers.rs && grep -qE 'fn discover_custom_themes_and_palette_entries_include_custom_toml' crates/scriptui-tui/src/palette.rs && grep -qE 'fn tui_app_handles_repeat_keys_ctrl_c_v_and_nonexistent_cli_file' crates/scriptui-tui/src/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12E: Static `SyntaxSet` Caching & Revision-Keyed Preview Pane Cache (`BUG-0023`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12E: Cache syntect's default `SyntaxSet` in a process-wide `LazyLock` and cache `PreviewDocument` inside `PreviewPaneState` keyed by `(doc_id, revision, theme_name, width)` to eliminate per-frame rebuilds.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/highlight.rs
+  - crates/scriptui-tui/src/preview_pane.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/highlight.rs:80-130 (CodeHighlighter)
+  - crates/scriptui-core/src/preview.rs:15-50 (PreviewDocument, build_preview)
+  - crates/scriptui-tui/src/preview_pane.rs:10-70 (PreviewPaneState, render_preview_pane)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT change `render_preview_pane`'s function signature or `CodeHighlighter::new()` / `highlight_block()` signatures.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Creating `CodeHighlighter::new()` reuses a single lazily initialized process-wide `SyntaxSet`, and `render_preview_pane` reuses its cached `PreviewDocument` across frames whenever the active document id, revision, theme name, and preview inner width are unchanged.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/highlight.rs` (`CodeHighlighter`):
+     - Store `SyntaxSet::load_defaults_newlines()` in a `static DEFAULT_SYNTAX_SET: LazyLock<SyntaxSet>` (or `OnceLock<SyntaxSet>`).
+     - `CodeHighlighter` borrows `&'static SyntaxSet` so `CodeHighlighter::new()` performs zero deserialization after first initialization.
+     - Expose `pub fn syntax_set_ptr(&self) -> *const SyntaxSet` (or `#[cfg(test)]` / `pub` helper) so unit tests can assert two `CodeHighlighter::new()` instances share the identical `SyntaxSet` allocation.
+  2. `crates/scriptui-tui/src/preview_pane.rs` (`PreviewPaneState`, `render_preview_pane`):
+     - Keep `pub scroll_line`, `pub total_lines`, `pub viewport_height`, `pub sync_enabled` and `Default` / `Debug` / `Clone` on `PreviewPaneState`.
+     - Add an internal cache storing `(doc_id: u64, doc_revision: u64, theme_name: String, inner_width: usize, preview_doc: PreviewDocument)` and a counter `rebuild_count: u64` with `pub fn rebuild_count(&self) -> u64`.
+     - In `render_preview_pane`: only call `state.build_active_preview(inner_width)` and increment `rebuild_count` when the cache is empty or any of `(doc_id, doc_revision, state.theme.name, inner_width)` changed; otherwise render directly from the cached `PreviewDocument` (still updating scroll sync for `editor_top_source_line` and `viewport_height`).
+
+Must still work:
+  - All existing `highlight.rs`, `preview_pane.rs`, and `tui_integration.rs` tests, including narrow preview rendering (`area.width < 2 || area.height < 2` early return) and scroll sync when `editor_top_source_line` changes without a document edit.
+
+Drops:
+  - `PreviewPaneState` no longer derives `Copy`, `PartialEq`, or `Eq` (it now owns the cached `PreviewDocument`; no callers in the workspace rely on `Copy` or `PartialEq` for `PreviewPaneState`).
+
+Tests:
+  - `code_highlighter_reuses_static_syntax_set` (in `highlight.rs`): two `CodeHighlighter::new()` instances share the same `SyntaxSet` pointer and both highlight a Rust snippet identically.
+  - `render_preview_pane_caches_until_doc_theme_or_width_changes` (in `preview_pane.rs`): rendering the same `EditorState` twice at `(60, 16)` keeps `pane_state.rebuild_count() == 1` even when `editor_top_source_line` changes; inserting text increments `rebuild_count()` to `2`; changing `area.width` to `40` increments `rebuild_count()` to `3`; changing `state.theme` increments `rebuild_count()` to `4`; rendering at `(40, 16)` again keeps `rebuild_count() == 4`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'LazyLock|OnceLock' crates/scriptui-core/src/highlight.rs && grep -qE 'pub fn rebuild_count' crates/scriptui-tui/src/preview_pane.rs && grep -qE 'fn code_highlighter_reuses_static_syntax_set' crates/scriptui-core/src/highlight.rs && grep -qE 'fn render_preview_pane_caches_until_doc_theme_or_width_changes' crates/scriptui-tui/src/preview_pane.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+### STEP 12F: Unix Signal Handling (`SIGTERM`/`SIGHUP`/`SIGTSTP`) & Alt-Screen Exit Error Ordering (`BUG-0024`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 12F: Register Unix `SIGTERM`/`SIGHUP`/`SIGTSTP` signal flags in `TerminalGuard`, poll them in `TuiApp::run_event_loop` for clean terminal restore/suspend, and drop `TerminalGuard` before printing exit errors in `main.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/Cargo.toml
+  - Cargo.lock
+  - crates/scriptui-tui/src/terminal.rs
+  - crates/scriptui-tui/src/app.rs
+  - crates/scriptui-tui/src/main.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/Cargo.toml:15-22 (dependencies; signal-hook 0.3.18 is already in Cargo.lock)
+  - crates/scriptui-tui/src/terminal.rs:19-76 (TerminalGuard, restore_terminal_best_effort)
+  - crates/scriptui-tui/src/app.rs:380-418 (run_event_loop)
+  - crates/scriptui-tui/src/main.rs:31-53 (TerminalGuard::enter, run_event_loop, error exit)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT add any crate not already present in `Cargo.lock` (`signal-hook = "0.3"` only under `[target.'cfg(unix)'.dependencies]`). Do NOT weaken `deny.toml`.
+
+[PRE_GATE]
+test -f deny.toml && command -v cargo-deny >/dev/null
+
+[MUTATION_SPEC]
+Goal: Receiving `SIGTERM` or `SIGHUP` exits the event loop cleanly so `TerminalGuard::drop` restores the terminal, `SIGTSTP` restores the terminal before suspending and re-enters TUI mode on resume, and any `run_event_loop` error is printed to stderr only after `TerminalGuard` has dropped and left the alternate screen.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/Cargo.toml` and `Cargo.lock`:
+     - Add `[target.'cfg(unix)'.dependencies]` with `signal-hook = "0.3"` (matching `signal-hook 0.3.18` already in `Cargo.lock`; `cargo deny check` must still exit `0`).
+  2. `crates/scriptui-tui/src/terminal.rs`:
+     - Introduce a small helper `SignalFlags` (containing `terminate: Arc<AtomicBool>` and `suspend: Arc<AtomicBool>`) with testable methods `should_terminate(&self) -> bool` and `take_suspend(&self) -> bool` (`swap(false, Ordering::SeqCst)`).
+     - On `#[cfg(unix)]`, `TerminalGuard::enter` registers `signal_hook::flag::register` for `SIGTERM` and `SIGHUP` -> `terminate`, and `SIGTSTP` -> `suspend`, storing the `SigId`s and unregistering them in `TerminalGuard::drop` alongside `restore_terminal_best_effort()`. On non-Unix targets, `SignalFlags` stays `false` (no-op).
+     - Expose on `TerminalGuard`:
+       - `pub fn should_terminate(&self) -> bool`
+       - `pub fn handle_suspend_if_requested(&mut self) -> io::Result<bool>`: if `take_suspend()` is `true`, on Unix restores the terminal (`restore_terminal_best_effort()`), raises `SIGSTOP` (`signal_hook::low_level::raise(signal_hook::consts::SIGSTOP)`), and upon `SIGCONT` resume re-enables raw mode, alt screen, mouse capture, bracketed paste, and calls `self.terminal.clear()?`, returning `Ok(true)`; returns `Ok(false)` when no suspend was requested.
+  3. `crates/scriptui-tui/src/app.rs` (`TuiApp::run_event_loop`):
+     - At the top of each loop iteration (and before redraw/poll), check `if guard.should_terminate() { self.state.should_quit = true; break; }`.
+     - Poll `if guard.handle_suspend_if_requested()? { needs_redraw = true; }`.
+  4. `crates/scriptui-tui/src/main.rs`:
+     - Scope `guard` in a block so `guard` drops (leaving the alternate screen and disabling raw mode) BEFORE `eprintln!("ScripTUI exited with error: {err}")` runs on `Err(err)`.
+
+Must still work:
+  - All existing `terminal.rs`, `app.rs`, and `tui_integration.rs` tests.
+  - `TerminalGuard` panic hook still restores the terminal on unwind.
+  - `cargo deny check` exits `0`.
+
+Drops: none
+
+Tests:
+  - `signal_flags_report_terminate_and_consume_suspend_once` (in `terminal.rs`): toggling `terminate` makes `should_terminate() == true`; toggling `suspend` makes the first `take_suspend()` return `true` and the second return `false`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo deny check && grep -qE 'signal-hook' crates/scriptui-tui/Cargo.toml && grep -qE 'pub fn should_terminate' crates/scriptui-tui/src/terminal.rs && grep -qE 'pub fn handle_suspend_if_requested' crates/scriptui-tui/src/terminal.rs && grep -qE 'should_terminate\(\)' crates/scriptui-tui/src/app.rs && grep -qE 'fn signal_flags_report_terminate_and_consume_suspend_once' crates/scriptui-tui/src/terminal.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.

@@ -685,3 +685,45 @@ title = "Add TerminalGuard/run_event_loop tests and complete STEP 10D real-termi
 status = "pending"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
+
+[[items.tasks]]
+id = "TASK-0065"
+title = "tooling"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
+
+[[items.tasks]]
+id = "TASK-0066"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
+
+[[items.tasks]]
+id = "TASK-0067"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
+
+[[items.tasks]]
+id = "TASK-0068"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
+
+[[items.tasks]]
+id = "TASK-0069"
+title = "perf"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
+
+[[items.tasks]]
+id = "TASK-0070"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-24T04:40:46Z"
