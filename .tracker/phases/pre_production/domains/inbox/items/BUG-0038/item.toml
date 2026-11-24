@@ -1,0 +1,17 @@
+[item]
+id = "BUG-0038"
+type = "bug"
+title = "DocumentBuffer::apply_insert and apply_delete reset SelectionSet primary_index to 0"
+status = "pending"
+severity = "low"
+scope_ref = "inbox"
+created_at = "2026-11-24T12:09:48Z"
+updated_at = "2026-11-24T12:13:08Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []

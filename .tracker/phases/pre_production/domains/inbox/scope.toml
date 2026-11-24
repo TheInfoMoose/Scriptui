@@ -185,28 +185,28 @@ created_at = "2026-11-23T14:34:51Z"
 [[items.bugs]]
 id = "BUG-0026"
 title = "Find/Replace bar leaks unhandled navigation keys to editor and retains stale focus/matches"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
 [[items.bugs]]
 id = "BUG-0027"
 title = "PreviewMode::Expanded scroll sync uses visual scroll_line and preview width uses chars().count()"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
 [[items.bugs]]
 id = "BUG-0028"
 title = "Super/Meta modifiers leak into character insertion and navigation"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
 [[items.bugs]]
 id = "BUG-0029"
 title = "Multi-cursor collapse in indent/move/newline and SelectionSet::primary not remapped in normalize()"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
@@ -227,7 +227,7 @@ created_at = "2026-11-23T14:35:06Z"
 [[items.bugs]]
 id = "BUG-0032"
 title = "Missing symlink containment checks on theme/locale loads and unbounded file/OSC 52 payloads"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
@@ -241,23 +241,51 @@ created_at = "2026-11-23T14:35:06Z"
 [[items.bugs]]
 id = "BUG-0034"
 title = 'No-op empty insert_text("") records undo entry and desyncs UndoStack::is_at_saved_state()'
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T05:26:21Z"
 
 [[items.bugs]]
 id = "BUG-0035"
 title = "run_event_loop propagates EINTR from event::poll/read instead of retrying on signal interruption"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T05:26:22Z"
 
 [[items.bugs]]
 id = "BUG-0036"
 title = "import_locale_files leaves partial .dic on disk if second fs::rename for .aff fails"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T05:26:23Z"
+
+[[items.bugs]]
+id = "BUG-0037"
+title = "Find/Replace bar swallows global shortcuts outside allowlist and blocks keyboard buffer switching"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T12:07:27Z"
+
+[[items.bugs]]
+id = "BUG-0038"
+title = "DocumentBuffer::apply_insert and apply_delete reset SelectionSet primary_index to 0"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T12:09:48Z"
+
+[[items.bugs]]
+id = "BUG-0039"
+title = "handle_insert_newline ignores secondary cursors on mixed ClearCurrentLine/Insert lines"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T12:09:57Z"
+
+[[items.bugs]]
+id = "BUG-0040"
+title = "modals.rs and palette.rs do not filter SUPER/HYPER/META modifiers on char input"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T12:12:29Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -783,3 +811,10 @@ title = "preview"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-24T05:39:37Z"
+
+[[items.tasks]]
+id = "TASK-0076"
+title = "Add unit test for DocumentBuffer::from_file MAX_FILE_BYTES rejection"
+status = "pending"
+severity = "low"
+created_at = "2026-11-24T12:12:55Z"
