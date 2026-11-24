@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 13):** Fix pre-release bugs and hardening gaps (`BUG-0026`, `BUG-0027`, `BUG-0028`, `BUG-0029`, `BUG-0032` core+OSC52, `BUG-0034`, `BUG-0035`, `BUG-0036`): `EINTR` retry + `Super`/`Meta` modifier filtering + OSC 52 payload cap, Find/Replace key capture & state reset, symlink containment + `O_EXCL`/rollback + max file size + empty insert undo guard, multi-cursor preservation & `SelectionSet::normalize` primary remapping, and `PreviewMode::Expanded` scroll sync + `unicode_width` table/preview layout.
+**Phase goal (Phase 14):** Fix Phase 13 review follow-ups (`BUG-0037`, `BUG-0038`, `BUG-0039`, `BUG-0040`, `TASK-0076`) and add the full-suite GitHub Actions CI workflow (`.github/workflows/ci.yml`; release workflow deferred to next phase).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,11 +28,10 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 13A** | `/goal` | tui | `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs` | — |
-| 2 | **STEP 13B** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/app.rs` | STEP 13A |
-| 3 | **STEP 13C** | `/goal` | core | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/buffer.rs` | — |
-| 4 | **STEP 13D** | `/goal` | core | `crates/scriptui-core/src/selection.rs`, `crates/scriptui-core/src/editor.rs` | STEP 13C |
-| 5 | **STEP 13E** | `/goal` | preview | `crates/scriptui-core/src/preview.rs`, `crates/scriptui-tui/src/app.rs` | STEP 13B |
+| 1 | **STEP 14A** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/modals.rs`, `crates/scriptui-tui/src/palette.rs` | — |
+| 2 | **STEP 14B** | `/goal` | core | `crates/scriptui-core/src/buffer.rs` | — |
+| 3 | **STEP 14C** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | STEP 14B |
+| 4 | **STEP 14D** | `/goal` | ci | `.github/workflows/ci.yml` | — |
 
 ### Completed
 
@@ -92,6 +91,11 @@
 | **STEP 12D** | Done (`a01c7eb`) | `/goal` | tui | `crates/scriptui-core/src/buffers.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/palette.rs` |
 | **STEP 12E** | Done (`f5febeb`) | `/goal` | perf | `crates/scriptui-core/src/highlight.rs`, `crates/scriptui-tui/src/preview_pane.rs` |
 | **STEP 12F** | Done (`213e951`) | `/goal` | tui | `crates/scriptui-tui/Cargo.toml`, `Cargo.lock`, `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/main.rs` |
+| **STEP 13A** | Done (`756f64c`) | `/goal` | tui | `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs` |
+| **STEP 13B** | Done (`16bfde8`) | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/app.rs` |
+| **STEP 13C** | Done (`82f06dc`) | `/goal` | core | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/buffer.rs` |
+| **STEP 13D** | Done (`9bc15ff`) | `/goal` | core | `crates/scriptui-core/src/selection.rs`, `crates/scriptui-core/src/editor.rs` |
+| **STEP 13E** | Done (`489e5f2`) | `/goal` | preview | `crates/scriptui-core/src/preview.rs`, `crates/scriptui-tui/src/app.rs` |
 
 ### Future phases
 
@@ -135,7 +139,7 @@
 
 ### Open Questions
 
-- **OQ-1 (Phase 13):** The old STEP 8C POST_GATE runs `python3 -c 'import yaml'`. PyYAML may not be on the Orrery host. Confirm it's installed, or use a gate with no extra package (`actionlint` if present). Waits on: user.
+- **OQ-1 (Phase 14 — resolved):** PyYAML (`python3 -c 'import yaml'`) is confirmed installed on the host and used for YAML syntax validation in STEP 14D's `POST_GATE`.
 - **OQ-2 (Phase 13):** How to exercise `release.yml` before the real tag: push a prerelease tag (`v0.1.0-rc.1`) and delete the release afterward, or add a `workflow_dispatch` trigger that builds without publishing. Waits on: user.
 - **OQ-3 (Phase 10 — resolved):** `[USER]` real-terminal checklist targets Linux desktop terminals (e.g., GNOME Terminal / Alacritty / Kitty / WezTerm); checklist lives in `docs/functional-verification-matrix.md`.
 
@@ -1401,6 +1405,226 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'UnicodeWidthStr' crates/scriptui-core/src/preview.rs && grep -qE 'fn wide_table_shrinks_and_measures_display_width' crates/scriptui-core/src/preview.rs && grep -qE 'fn expanded_preview_scroll_sync_maps_visual_scroll_to_logical_line' crates/scriptui-tui/src/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+---
+
+## Phase 14 Step Blocks
+
+### STEP 14A: Find/Replace Global Shortcut Passthrough & Modal/Palette Modifier Filtering
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0037`, `BUG-0040`
+
+```text
+[STEP_ID]
+STEP 14A: Pass global shortcuts through handle_find_bar_key instead of swallowing non-whitelisted keys, and filter SUPER/HYPER/META (and confirm-modal modifiers) in modals.rs and palette.rs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/find_bar.rs
+  - crates/scriptui-tui/src/modals.rs
+  - crates/scriptui-tui/src/palette.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/find_bar.rs:108-235,332-405 (handle_find_bar_key, find_bar_consumes_navigation_and_delete_keys)
+  - crates/scriptui-tui/src/app.rs:344-379 (Action::NextBuffer/PrevBuffer/CloseBuffer/NewBuffer find-bar reset, SUPER/HYPER/META filter)
+  - crates/scriptui-tui/src/modals.rs:198-217,260-285 (handle_confirm_modal_key, handle_file_prompt_key)
+  - crates/scriptui-tui/src/palette.rs:285-330 (handle_palette_key)
+  - crates/scriptui-core/src/keymap.rs:161-260 (Keymap::default_cua global shortcuts)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify app.rs or keymap.rs.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: While Find/Replace is open, unmodified/Shift navigation and delete keys stay captured inside the find bar while all global shortcuts (including Ctrl+PageDown/Up, Ctrl+W/N/O, Ctrl+Shift+S/P, Ctrl+P, F1, Alt+P, Alt+Z) pass through to TuiApp::handle_key_event; meanwhile, OpenFilePrompt, SaveAsPrompt, CommandPalette, and ConfirmQuit/ConfirmCloseBuffer ignore SUPER/HYPER/META (and modified confirm) keys.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/find_bar.rs` (`handle_find_bar_key`):
+     - Consume `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`, `PageUp`, and `PageDown` only when `!key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)` (so unmodified and `Shift`-modified navigation/delete keys do not leak into the editor buffer, while `Ctrl+PageDown`/`Ctrl+PageUp` pass through).
+     - For `Alt+<char>` (when `key.modifiers.contains(KeyModifiers::ALT)` and `!key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)`), consume only `'c' | 'w' | 'r'` (case-insensitive) to toggle case-sensitivity, whole-word, and regex. Return `Ok(false)` for other `Alt` chords (such as `Alt+P`, `Alt+Z`).
+     - Return `Ok(false)` for unhandled keys (do not swallow unmatched keys with `_ => Ok(true)`), so global shortcuts (`Ctrl+F`, `Ctrl+H`, `Ctrl+Q`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+N`, `Ctrl+O`, `Ctrl+W`, `Ctrl+P`, `Ctrl+Shift+P`, `Ctrl+PageDown`, `Ctrl+PageUp`, `F1`, `F3`, `Shift+F3`, `Alt+P`, `Alt+Z`) pass through to `TuiApp::handle_key_event`.
+  2. `crates/scriptui-tui/src/modals.rs`:
+     - In `handle_file_prompt_key`, filter `KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META` on `KeyCode::Char(c)` so `Super`/`Hyper`/`Meta`-modified characters are not appended to `state.file_prompt_input`.
+     - In `handle_confirm_modal_key`, accept `KeyCode::Char('y' | 'Y' | 'n' | 'N')` only when `!key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)`, and accept `KeyCode::Enter` / `KeyCode::Esc` only when `key.modifiers.is_empty()`. Return `false` for modified keys (e.g. `Ctrl+Y`, `Super+Y`, `Alt+N`, `Ctrl+Enter`).
+  3. `crates/scriptui-tui/src/palette.rs`:
+     - In `handle_palette_key`, filter `KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META` on `KeyCode::Char(c)` so `Super`/`Hyper`/`Meta`-modified characters are not appended to `state.palette.query`.
+
+Must still work:
+  - `find_bar_consumes_navigation_and_delete_keys` (unmodified Delete/Left/Right/Up/Down/Home/End/PageUp/PageDown remain consumed and never mutate the editor buffer or selection).
+  - `find_bar_typing_toggles_replace_and_alt_enter_multicursor` (typing, `Alt+C`/`Alt+W`/`Alt+R`, `Tab`, `Enter`, `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, `Esc`).
+  - Existing modal and command palette typing, uppercase (`Shift+Char`), `Enter`, `Backspace`, and `Esc` tests.
+
+Drops: none
+
+Tests:
+  - `find_bar_passes_through_global_shortcuts_and_resets_on_ctrl_pagedown` (in `find_bar.rs`): verify `handle_find_bar_key` returns `Ok(false)` for `Ctrl+PageDown`, `Ctrl+PageUp`, `Ctrl+W`, `Ctrl+N`, `Ctrl+O`, `Ctrl+Shift+S`, `Ctrl+P`, `Ctrl+Shift+P`, `F1`, `Alt+P`, and `Alt+Z`; then on a `TuiApp` with 2 buffers, `OverlayMode::Replace`, `bar_state.focus = FindFocus::Replacement`, and populated `find_replace.matches`, dispatch `Ctrl+PageDown` through `TuiApp::handle_key_event` -> active buffer switches, `find_replace.matches` is empty, `find_replace.active_match` is `None`, and `find_bar.focus == FindFocus::Query`.
+  - `modals_ignore_super_hyper_meta_and_modified_confirm_keys` (in `modals.rs`): in `OverlayMode::OpenFilePrompt`, `Super+s`, `Hyper+a`, and `Meta+b` leave `file_prompt_input` empty while plain `'a'` appends `'a'`; in `OverlayMode::ConfirmQuit`, `Ctrl+Y`, `Super+Y`, `Alt+N`, and `Ctrl+Enter` return `false` and leave `overlay == OverlayMode::ConfirmQuit`, while plain `'n'` returns `true` and dismisses the modal.
+  - `palette_ignores_super_hyper_meta_char_input` (in `palette.rs`): in `OverlayMode::CommandPalette`, `Super+s`, `Hyper+x`, and `Meta+z` leave `palette.query` empty while plain `'t'` appends `'t'`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn find_bar_passes_through_global_shortcuts_and_resets_on_ctrl_pagedown' crates/scriptui-tui/src/find_bar.rs && grep -qE 'fn modals_ignore_super_hyper_meta_and_modified_confirm_keys' crates/scriptui-tui/src/modals.rs && grep -qE 'fn palette_ignores_super_hyper_meta_char_input' crates/scriptui-tui/src/palette.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 14B: Preserve `SelectionSet::primary_index` in `DocumentBuffer` Edits & Test `MAX_FILE_BYTES`
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0038`, `TASK-0076`
+
+```text
+[STEP_ID]
+STEP 14B: Preserve SelectionSet::primary_index in DocumentBuffer::apply_insert and apply_delete, and add a unit test for DocumentBuffer::from_file MAX_FILE_BYTES rejection.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/buffer.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/buffer.rs:117-145,305-413 (from_file, MAX_FILE_BYTES, apply_insert, apply_delete)
+  - crates/scriptui-core/src/selection.rs:64-95 (SelectionSet::from_ranges_with_primary, primary_index)
+  - crates/scriptui-core/Cargo.toml:24-25 (tempfile dev-dependency)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change MAX_FILE_BYTES value or SelectionSet API.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Multi-cursor inserts and deletes in `DocumentBuffer` preserve which cursor is primary (`primary_index`) instead of resetting it to `0`, and `DocumentBuffer::from_file` rejecting files larger than `MAX_FILE_BYTES` is covered by an automated unit test.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/buffer.rs`:
+     - In `DocumentBuffer::apply_insert` and `DocumentBuffer::apply_delete`, capture `self.selection.primary_index()` before rebuilding `self.selection` and construct the new selection via `SelectionSet::from_ranges_with_primary(new_ranges, primary_index)` so `primary_index` tracks the same cursor (or the merged range containing it after `normalize`).
+     - Keep `self.selection.clamp(self.len_chars())`, empty-insert no-op behavior, `dirty`, and `revision` semantics unchanged.
+
+Must still work:
+  - Single-cursor and multi-cursor insert/delete offsets, undo/redo inverse edits, and `empty_insert_does_not_dirty_or_bump_revision`.
+  - `DocumentBuffer::from_file` reading normal files up to `MAX_FILE_BYTES`.
+
+Drops: none
+
+Tests:
+  - `apply_insert_and_delete_preserve_nonzero_primary_index` (in `buffer.rs`): build a `DocumentBuffer` from `"alpha beta gamma"` with `SelectionSet::from_ranges_with_primary(vec![Selection::point(5), Selection::point(10)], 1)` -> after `apply_insert("!")`, `selection().primary_index() == 1` and `selection().primary() == Selection::point(12)`; after `apply_delete(true)`, `selection().primary_index() == 1` and `selection().primary() == Selection::point(10)`.
+  - `from_file_rejects_files_exceeding_max_file_bytes` (in `buffer.rs`): create a temporary sparse file (`tempfile::NamedTempFile`) with `set_len(MAX_FILE_BYTES + 1)` -> `DocumentBuffer::from_file(tmp.path())` returns `Err(ScriptuiError::Io { source, .. })` where `source.kind() == std::io::ErrorKind::InvalidData` and `source.to_string()` contains `"exceeds maximum allowed size"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'from_ranges_with_primary' crates/scriptui-core/src/buffer.rs && grep -qE 'fn apply_insert_and_delete_preserve_nonzero_primary_index' crates/scriptui-core/src/buffer.rs && grep -qE 'fn from_file_rejects_files_exceeding_max_file_bytes' crates/scriptui-core/src/buffer.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 14C: Mixed-Cursor `handle_insert_newline` Per-Cursor Handling
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0039`
+
+```text
+[STEP_ID]
+STEP 14C: Evaluate EnterOutcome per cursor line in EditorState::handle_insert_newline so mixed ClearCurrentLine and Insert cursors both apply in one atomic undoable transaction.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/editor.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/editor.rs:844-906 (handle_insert_newline)
+  - crates/scriptui-core/src/indent.rs (compute_enter_indent, EnterOutcome)
+  - crates/scriptui-core/src/selection.rs:64-95 (SelectionSet::from_ranges_with_primary)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify indent.rs or buffer.rs.
+
+[PRE_GATE]
+grep -qE 'from_ranges_with_primary' crates/scriptui-core/src/buffer.rs
+
+[MUTATION_SPEC]
+Goal: Pressing Enter with multiple cursors where some cursors sit on empty list/quote markers (`EnterOutcome::ClearCurrentLine`) and others sit on normal text or non-empty list items (`EnterOutcome::Insert`) applies each cursor's own `EnterOutcome` in one undoable transaction while preserving all cursors and `primary_index`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/editor.rs` (`EditorState::handle_insert_newline`):
+     - Compute `EnterOutcome` (`compute_enter_indent`) for each cursor's line (respecting `gfm.is_line_in_code_block(line)` and `self.config.indent`).
+     - Apply all per-cursor edits in reverse document order so earlier offsets remain valid:
+       - For `EnterOutcome::ClearCurrentLine`: clear that line's full content (`line_start..line_end` -> `""`), coalescing multiple cursors on the same cleared line so the line is cleared at most once, and place resulting caret(s) at `line_start`.
+       - For `EnterOutcome::Insert(text)`: replace that cursor's selection span (`sel.start()..sel.end()`) with `text` and place the resulting caret at `shifted_start + text.chars().count()`.
+     - Rebuild `SelectionSet` via `SelectionSet::from_ranges_with_primary(..., selection_before.primary_index())`, clamp to `doc.len_chars()`, and record all edits in a single `EditTransaction` in `active.history` so one `Action::Undo` restores the exact pre-Enter text and `SelectionSet`.
+
+Must still work:
+  - Single-cursor auto-indent, Markdown list/task/quote continuation, empty list-marker clearing, and fenced code-block Enter behavior.
+  - `multi_cursor_preserved_across_indent_move_and_clear_line`.
+  - Homogeneous multi-cursor Enter (all `Insert` or all `ClearCurrentLine`).
+
+Drops: none
+
+Tests:
+  - `mixed_multicursor_enter_handles_clear_and_insert_lines_together` (in `editor.rs`):
+    - Case 1 (primary on empty bullet): text `"- \nhello"`, cursors at `2` (primary, index `0`) and `8` -> `Action::InsertNewline` produces `"\nhello\n"`, `selection().len() == 2`, `selection().primary_index() == 0`; `Action::Undo` restores `"- \nhello"` and the original `SelectionSet`.
+    - Case 2 (primary on normal text): text `"- \nhello"`, cursors at `2` and `8` (primary, index `1`) -> `Action::InsertNewline` produces `"\nhello\n"`, `selection().len() == 2`, `selection().primary_index() == 1`; `Action::Undo` restores `"- \nhello"` and the original `SelectionSet`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn mixed_multicursor_enter_handles_clear_and_insert_lines_together' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 14D: Full-Suite GitHub Actions CI Workflow (`.github/workflows/ci.yml`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 14D: Add GitHub Actions CI workflow running rustfmt, clippy, full workspace tests (Linux + macOS), cargo deny check, and locked release build on master pushes and PRs.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/ci.yml (NEW)
+READ_ONLY_REFS:
+  - Cargo.toml:1-20 (workspace members, rust-version, release profile)
+  - deny.toml:1-38 (cargo-deny configuration and target triples)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do NOT create .github/workflows/release.yml in this step. Do not hardcode secrets, tokens, or personal paths.
+
+[PRE_GATE]
+test -f deny.toml
+
+[MUTATION_SPEC]
+Goal: Every push to `master` and pull request targeting `master` runs the full CI verification suite (formatting, clippy, full workspace test suite on Linux and macOS, `cargo deny check`, and locked release build).
+
+Contract & Behavior:
+  1. `.github/workflows/ci.yml` (new):
+     - `name: CI`
+     - Triggers: `push` on `branches: [master]` and `pull_request` on `branches: [master]`.
+     - Top-level `permissions:` with `contents: read` only.
+     - Job `check` (`runs-on: ubuntu-latest`):
+       - `actions/checkout@v4`
+       - `dtolnay/rust-toolchain@stable` with `components: rustfmt, clippy`
+       - `Swatinem/rust-cache@v2`
+       - Run `cargo fmt --all -- --check`
+       - Run `cargo clippy --workspace --all-targets -- -D warnings`
+       - Run `cargo test --workspace`
+       - Run `EmbarkStudios/cargo-deny-action@v2` with `command: check`
+       - Run `cargo build --release --locked`
+     - Job `macos-test` (`runs-on: macos-14`):
+       - `actions/checkout@v4`
+       - `dtolnay/rust-toolchain@stable`
+       - `Swatinem/rust-cache@v2`
+       - Run `cargo test --workspace`
+
+Must still work:
+  - Local workspace build, clippy, formatting, and all unit/integration tests unchanged.
+
+Drops: none
+
+Tests:
+  - None in Rust (workflow YAML step). `POST_GATE` parses `.github/workflows/ci.yml` with PyYAML and asserts the `name`, `check` job, `macos-test` job, and required CI commands are present.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && python3 -c 'import yaml; d = yaml.safe_load(open(".github/workflows/ci.yml")); assert d["name"] == "CI" and "check" in d["jobs"] and "macos-test" in d["jobs"]' && grep -qE 'cargo fmt --all -- --check' .github/workflows/ci.yml && grep -qE 'cargo clippy --workspace --all-targets -- -D warnings' .github/workflows/ci.yml && grep -qE 'cargo test --workspace' .github/workflows/ci.yml && grep -qE 'cargo-deny-action' .github/workflows/ci.yml && grep -qE 'cargo build --release --locked' .github/workflows/ci.yml
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
