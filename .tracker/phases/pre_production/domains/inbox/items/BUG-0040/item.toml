@@ -2,11 +2,11 @@
 id = "BUG-0040"
 type = "bug"
 title = "modals.rs and palette.rs do not filter SUPER/HYPER/META modifiers on char input"
-status = "pending"
+status = "closed"
 severity = "low"
 scope_ref = "inbox"
 created_at = "2026-11-24T12:12:29Z"
-updated_at = "2026-11-24T12:13:08Z"
+updated_at = "2026-11-24T19:06:44Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "be6c288"
+summary = "Fixed in STEP 14A (be6c288): filtered SUPER/HYPER/META and confirm-modal modifiers"

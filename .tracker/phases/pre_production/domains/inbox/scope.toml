@@ -262,30 +262,44 @@ created_at = "2026-11-24T05:26:23Z"
 [[items.bugs]]
 id = "BUG-0037"
 title = "Find/Replace bar swallows global shortcuts outside allowlist and blocks keyboard buffer switching"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T12:07:27Z"
 
 [[items.bugs]]
 id = "BUG-0038"
 title = "DocumentBuffer::apply_insert and apply_delete reset SelectionSet primary_index to 0"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T12:09:48Z"
 
 [[items.bugs]]
 id = "BUG-0039"
 title = "handle_insert_newline ignores secondary cursors on mixed ClearCurrentLine/Insert lines"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T12:09:57Z"
 
 [[items.bugs]]
 id = "BUG-0040"
 title = "modals.rs and palette.rs do not filter SUPER/HYPER/META modifiers on char input"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T12:12:29Z"
+
+[[items.bugs]]
+id = "BUG-0041"
+title = "Find/Replace bar leaks document-editing Ctrl shortcuts (Ctrl+Z/Y/X/C/V/A) to editor"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T19:02:32Z"
+
+[[items.bugs]]
+id = "BUG-0042"
+title = "handle_insert_newline applies overlapping edits when selection crosses a ClearCurrentLine line"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-24T19:02:39Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -815,7 +829,7 @@ created_at = "2026-11-24T05:39:37Z"
 [[items.tasks]]
 id = "TASK-0076"
 title = "Add unit test for DocumentBuffer::from_file MAX_FILE_BYTES rejection"
-status = "pending"
+status = "closed"
 severity = "low"
 created_at = "2026-11-24T12:12:55Z"
 
