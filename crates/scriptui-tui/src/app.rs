@@ -399,6 +399,14 @@ impl TuiApp {
     pub fn run_event_loop(&mut self, guard: &mut TerminalGuard) -> io::Result<()> {
         let mut needs_redraw = true;
         while !self.state.should_quit {
+            if guard.should_terminate() {
+                self.state.should_quit = true;
+                break;
+            }
+            if guard.handle_suspend_if_requested()? {
+                needs_redraw = true;
+            }
+
             if needs_redraw {
                 guard.terminal_mut().draw(|f| self.render_frame(f))?;
                 needs_redraw = false;

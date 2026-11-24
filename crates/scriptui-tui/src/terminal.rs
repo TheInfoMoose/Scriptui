@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 use std::panic;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crossterm::cursor::Show;
 use crossterm::event::{
@@ -16,8 +18,58 @@ use scriptui_core::{KeyChord, KeyCode, KeyModifiers};
 
 pub type CrosstermTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
+#[derive(Debug, Default, Clone)]
+struct SignalFlags {
+    terminate: Arc<AtomicBool>,
+    suspend: Arc<AtomicBool>,
+}
+
+impl SignalFlags {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn should_terminate(&self) -> bool {
+        self.terminate.load(Ordering::SeqCst)
+    }
+
+    fn take_suspend(&self) -> bool {
+        self.suspend.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(unix)]
+fn register_unix_signals(flags: &SignalFlags) -> io::Result<Vec<signal_hook::SigId>> {
+    use signal_hook::consts::signal::{SIGHUP, SIGTERM, SIGTSTP};
+    use signal_hook::flag;
+
+    let mut ids = Vec::with_capacity(3);
+    let registrations = [
+        (SIGTERM, Arc::clone(&flags.terminate)),
+        (SIGHUP, Arc::clone(&flags.terminate)),
+        (SIGTSTP, Arc::clone(&flags.suspend)),
+    ];
+
+    for (sig, flag_arc) in registrations {
+        match flag::register(sig, flag_arc) {
+            Ok(id) => ids.push(id),
+            Err(err) => {
+                for registered in ids {
+                    signal_hook::low_level::unregister(registered);
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(ids)
+}
+
 pub struct TerminalGuard {
     terminal: CrosstermTerminal,
+    signals: SignalFlags,
+    #[cfg(unix)]
+    signal_ids: Vec<signal_hook::SigId>,
 }
 
 impl TerminalGuard {
@@ -49,16 +101,64 @@ impl TerminalGuard {
             }
         };
 
-        Ok(Self { terminal })
+        let signals = SignalFlags::new();
+        #[cfg(unix)]
+        let signal_ids = match register_unix_signals(&signals) {
+            Ok(ids) => ids,
+            Err(err) => {
+                restore_terminal_best_effort();
+                return Err(err);
+            }
+        };
+
+        Ok(Self {
+            terminal,
+            signals,
+            #[cfg(unix)]
+            signal_ids,
+        })
     }
 
     pub fn terminal_mut(&mut self) -> &mut CrosstermTerminal {
         &mut self.terminal
     }
+
+    pub fn should_terminate(&self) -> bool {
+        self.signals.should_terminate()
+    }
+
+    pub fn handle_suspend_if_requested(&mut self) -> io::Result<bool> {
+        if !self.signals.take_suspend() {
+            return Ok(false);
+        }
+
+        #[cfg(unix)]
+        {
+            restore_terminal_best_effort();
+            signal_hook::low_level::raise(signal_hook::consts::SIGSTOP)?;
+            enable_raw_mode()?;
+            if let Err(err) = execute!(
+                io::stdout(),
+                EnterAlternateScreen,
+                EnableMouseCapture,
+                EnableBracketedPaste
+            ) {
+                restore_terminal_best_effort();
+                return Err(err);
+            }
+            self.terminal.clear()?;
+        }
+
+        Ok(true)
+    }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        #[cfg(unix)]
+        for id in self.signal_ids.drain(..) {
+            signal_hook::low_level::unregister(id);
+        }
         restore_terminal_best_effort();
     }
 }
@@ -178,5 +278,19 @@ mod tests {
         let mut buffer = Vec::new();
         write_osc52_clipboard(&mut buffer, "hello").expect("write to Vec<u8> should succeed");
         assert_eq!(buffer, b"\x1b]52;c;aGVsbG8=\x07");
+    }
+
+    #[test]
+    fn signal_flags_report_terminate_and_consume_suspend_once() {
+        let flags = SignalFlags::new();
+        assert!(!flags.should_terminate());
+        assert!(!flags.take_suspend());
+
+        flags.terminate.store(true, Ordering::SeqCst);
+        assert!(flags.should_terminate());
+
+        flags.suspend.store(true, Ordering::SeqCst);
+        assert!(flags.take_suspend());
+        assert!(!flags.take_suspend());
     }
 }

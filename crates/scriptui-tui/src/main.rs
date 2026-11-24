@@ -36,15 +36,19 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut guard = match TerminalGuard::enter() {
-        Ok(guard) => guard,
-        Err(err) => {
-            eprintln!("Failed to enter terminal UI mode: {err}");
-            return ExitCode::FAILURE;
-        }
+    let run_result = {
+        let mut guard = match TerminalGuard::enter() {
+            Ok(guard) => guard,
+            Err(err) => {
+                eprintln!("Failed to enter terminal UI mode: {err}");
+                return ExitCode::FAILURE;
+            }
+        };
+
+        app.run_event_loop(&mut guard)
     };
 
-    if let Err(err) = app.run_event_loop(&mut guard) {
+    if let Err(err) = run_result {
         eprintln!("ScripTUI exited with error: {err}");
         return ExitCode::FAILURE;
     }

@@ -20,5 +20,8 @@ ratatui = "0.29"
 crossterm = "0.28"
 clap = { version = "4", features = ["derive"] }
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
 [dev-dependencies]
 tempfile = "3"

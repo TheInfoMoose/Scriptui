@@ -856,6 +856,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "scriptui-core",
+ "signal-hook",
  "tempfile",
 ]
 
