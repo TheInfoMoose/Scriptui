@@ -303,6 +303,7 @@ impl DocumentBuffer {
     }
 
     pub fn apply_insert(&mut self, text: &str) -> Vec<BufferEdit> {
+        let primary_index = self.selection.primary_index();
         let len_chars = self.len_chars();
         let spans: Vec<(usize, usize)> = self
             .selection
@@ -342,7 +343,7 @@ impl DocumentBuffer {
             delta += inserted_chars as isize - (end - start) as isize;
         }
 
-        self.selection = SelectionSet::from_ranges(new_ranges);
+        self.selection = SelectionSet::from_ranges_with_primary(new_ranges, primary_index);
         self.selection.clamp(self.len_chars());
         if !edits.is_empty()
             && edits
@@ -356,6 +357,7 @@ impl DocumentBuffer {
     }
 
     pub fn apply_delete(&mut self, backward: bool) -> Vec<BufferEdit> {
+        let primary_index = self.selection.primary_index();
         let len_chars = self.len_chars();
         let spans: Vec<(usize, usize)> = self
             .selection
@@ -402,7 +404,7 @@ impl DocumentBuffer {
             delta -= (end - start) as isize;
         }
 
-        self.selection = SelectionSet::from_ranges(new_ranges);
+        self.selection = SelectionSet::from_ranges_with_primary(new_ranges, primary_index);
         self.selection.clamp(self.len_chars());
         if !edits.is_empty() {
             self.dirty = true;
@@ -588,5 +590,40 @@ mod tests {
         assert!(edits.is_empty());
         assert!(!buf.is_dirty());
         assert_eq!(buf.revision(), 0);
+    }
+
+    #[test]
+    fn apply_insert_and_delete_preserve_nonzero_primary_index() {
+        let mut buf = DocumentBuffer::from_str_content("alpha beta gamma");
+        buf.set_selection(SelectionSet::from_ranges_with_primary(
+            vec![Selection::point(5), Selection::point(10)],
+            1,
+        ));
+
+        let _ = buf.apply_insert("!");
+        assert_eq!(buf.selection().primary_index(), 1);
+        assert_eq!(buf.selection().primary(), Selection::point(12));
+
+        let _ = buf.apply_delete(true);
+        assert_eq!(buf.selection().primary_index(), 1);
+        assert_eq!(buf.selection().primary(), Selection::point(10));
+    }
+
+    #[test]
+    fn from_file_rejects_files_exceeding_max_file_bytes() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.as_file().set_len(MAX_FILE_BYTES + 1).unwrap();
+
+        let err = DocumentBuffer::from_file(tmp.path()).unwrap_err();
+        match err {
+            ScriptuiError::Io { source, .. } => {
+                assert_eq!(source.kind(), std::io::ErrorKind::InvalidData);
+                assert!(
+                    source.to_string().contains("exceeds maximum allowed size"),
+                    "unexpected error message: {source}"
+                );
+            }
+            other => panic!("expected ScriptuiError::Io, got {other:?}"),
+        }
     }
 }
