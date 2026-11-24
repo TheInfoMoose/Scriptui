@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0083"
 type = "task"
 title = "ci"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T19:15:28Z"
-updated_at = "2026-11-24T19:15:28Z"
+updated_at = "2026-11-24T19:29:42Z"
 source_ref = "STEP 15C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0083@2026-11-24T19:27:40Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "78d8ea7"
+summary = "STEP 15C: Tag-Triggered and Dry-Run GitHub Actions Release Workflow (`.github/workflows/release.yml`) (phased check PASS)"
