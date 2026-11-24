@@ -1,5 +1,6 @@
 use comrak::nodes::{AstNode, ListType, NodeValue, Sourcepos, TableAlignment};
 use comrak::{parse_document, Arena};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::highlight::{CodeHighlighter, StyleFlags, StyledSegment};
 use crate::markdown::gfm_options;
@@ -160,12 +161,12 @@ impl<'a> PreviewRenderer<'a> {
         let stack_width: usize = self
             .prefix_stack
             .iter()
-            .map(|seg| seg.text.chars().count())
+            .map(|seg| UnicodeWidthStr::width(seg.text.as_str()))
             .sum();
         let pending_width = self
             .pending_first_prefix
             .as_ref()
-            .map(|(first, _)| first.text.chars().count())
+            .map(|(first, _)| UnicodeWidthStr::width(first.text.as_str()))
             .unwrap_or(0);
         stack_width + pending_width
     }
@@ -483,7 +484,7 @@ impl<'a> PreviewRenderer<'a> {
             } else {
                 self.palette.md_list_marker
             };
-            let marker_width = marker_text.chars().count();
+            let marker_width = UnicodeWidthStr::width(marker_text.as_str());
             let first_prefix = StyledSegment {
                 text: marker_text,
                 fg: marker_fg,
@@ -543,7 +544,7 @@ impl<'a> PreviewRenderer<'a> {
             });
         } else {
             let label = format!(" {lang} ");
-            let used = 2 + label.chars().count() + 1; // "┌─" + label + "┐"
+            let used = 2 + UnicodeWidthStr::width(label.as_str()) + 1; // "┌─" + label + "┐"
             let trailing_dashes = avail.saturating_sub(used);
             top_segments.push(StyledSegment {
                 text: "┌─".to_string(),
@@ -688,17 +689,49 @@ impl<'a> PreviewRenderer<'a> {
         let border_overhead = col_count * 3 + 1;
         let max_content = avail.saturating_sub(border_overhead);
         let total_content: usize = col_widths.iter().sum();
-        if max_content >= col_count && total_content > max_content {
-            let mut excess = total_content - max_content;
-            while excess > 0 {
+        if total_content > max_content {
+            let target = max_content.max(col_count);
+            let orig_widths = col_widths.clone();
+            let mut remainders: Vec<(usize, usize)> = Vec::with_capacity(col_count);
+            for (idx, &w) in orig_widths.iter().enumerate() {
+                let scaled_num = w.saturating_mul(target);
+                let scaled = (scaled_num / total_content).max(1);
+                let rem = scaled_num % total_content;
+                col_widths[idx] = scaled;
+                remainders.push((idx, rem));
+            }
+
+            let mut current_sum: usize = col_widths.iter().sum();
+            while current_sum > target {
                 if let Some((idx, &max_w)) = col_widths.iter().enumerate().max_by_key(|&(_, w)| w) {
                     if max_w <= 1 {
                         break;
                     }
                     col_widths[idx] -= 1;
-                    excess -= 1;
+                    current_sum -= 1;
                 } else {
                     break;
+                }
+            }
+
+            if current_sum < target {
+                remainders.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+                let mut remaining = target - current_sum;
+                while remaining > 0 {
+                    let mut progressed = false;
+                    for &(idx, _) in &remainders {
+                        if remaining == 0 {
+                            break;
+                        }
+                        if col_widths[idx] < orig_widths[idx] {
+                            col_widths[idx] += 1;
+                            remaining -= 1;
+                            progressed = true;
+                        }
+                    }
+                    if !progressed {
+                        break;
+                    }
                 }
             }
         }
@@ -793,7 +826,7 @@ impl<'a> PreviewRenderer<'a> {
         };
 
         let label = format!("[{name}]: ");
-        let label_width = label.chars().count();
+        let label_width = UnicodeWidthStr::width(label.as_str());
         let first_prefix = StyledSegment {
             text: label,
             fg: self.palette.muted,
@@ -1055,7 +1088,7 @@ fn wrap_segments(segments: &[StyledSegment], max_width: usize) -> Vec<Vec<Styled
     for seg in segments {
         for piece in split_word_pieces(&seg.text) {
             let is_ws = piece.chars().all(char::is_whitespace);
-            let piece_width = piece.chars().count();
+            let piece_width = UnicodeWidthStr::width(piece);
 
             if is_ws {
                 if current_width == 0 {
@@ -1085,7 +1118,8 @@ fn wrap_segments(segments: &[StyledSegment], max_width: usize) -> Vec<Vec<Styled
                 let mut chunk = String::new();
                 let mut chunk_w = 0usize;
                 for ch in piece.chars() {
-                    if chunk_w == max_width {
+                    let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if chunk_w > 0 && chunk_w + ch_w > max_width {
                         push_coalesced(&mut current, &chunk, seg.fg, seg.bg, seg.flags);
                         lines.push(std::mem::take(&mut current));
                         chunk.clear();
@@ -1093,7 +1127,7 @@ fn wrap_segments(segments: &[StyledSegment], max_width: usize) -> Vec<Vec<Styled
                         current_width = 0;
                     }
                     chunk.push(ch);
-                    chunk_w += 1;
+                    chunk_w += ch_w;
                 }
                 if !chunk.is_empty() {
                     push_coalesced(&mut current, &chunk, seg.fg, seg.bg, seg.flags);
@@ -1146,7 +1180,10 @@ fn trim_trailing_whitespace(segments: &mut Vec<StyledSegment>) {
 }
 
 fn segments_char_width(segments: &[StyledSegment]) -> usize {
-    segments.iter().map(|s| s.text.chars().count()).sum()
+    segments
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.text.as_str()))
+        .sum()
 }
 
 fn truncate_segments(segments: &[StyledSegment], max_width: usize) -> Vec<StyledSegment> {
@@ -1156,12 +1193,21 @@ fn truncate_segments(segments: &[StyledSegment], max_width: usize) -> Vec<Styled
         if remaining == 0 {
             break;
         }
-        let seg_w = seg.text.chars().count();
+        let seg_w = UnicodeWidthStr::width(seg.text.as_str());
         if seg_w <= remaining {
             out.push(seg.clone());
             remaining -= seg_w;
         } else {
-            let truncated: String = seg.text.chars().take(remaining).collect();
+            let mut truncated = String::new();
+            let mut used = 0usize;
+            for ch in seg.text.chars() {
+                let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if used + ch_w > remaining {
+                    break;
+                }
+                truncated.push(ch);
+                used += ch_w;
+            }
             if !truncated.is_empty() {
                 out.push(StyledSegment {
                     text: truncated,
@@ -1384,5 +1430,27 @@ mod tests {
             plain2_idx > plain1_idx,
             "expected plain two after plain one, got:\n{joined}"
         );
+    }
+
+    #[test]
+    fn wide_table_shrinks_and_measures_display_width() {
+        let md = concat!(
+            "| 項目 | 説明テキスト長い列 |\n",
+            "|------|--------------------|\n",
+            "| 日本語テスト | これは非常に長い日本語テーブルセルの内容です |\n",
+        );
+
+        let theme = default_theme().expect("default theme");
+        let doc = build_preview(md, &theme, 24);
+        let plain = doc.plain_lines();
+        assert!(!plain.is_empty(), "expected rendered table lines");
+
+        for line in &plain {
+            let display_w = UnicodeWidthStr::width(line.as_str());
+            assert!(
+                display_w <= 24,
+                "expected line display width <= 24, got {display_w} for line: {line:?}"
+            );
+        }
     }
 }

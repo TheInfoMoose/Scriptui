@@ -9,7 +9,8 @@ use crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use scriptui_core::{
-    Action, AppConfig, EditorState, OverlayMode, ScriptuiError, ScriptuiResult, WrappedLayout,
+    compute_wrapped_layout, Action, AppConfig, EditorState, IndentStyle, OverlayMode,
+    ScriptuiError, ScriptuiResult, WrappedLayout,
 };
 
 use crate::chrome::{
@@ -136,7 +137,13 @@ impl TuiApp {
             compute_screen_regions(total_area, self.state.preview_mode, self.state.overlay);
         let tab_hitboxes = render_tab_bar(frame, regions.tab_bar, &self.state);
 
-        let (viewport, wrapped_layout) = if let Some(editor_rect) = regions.editor {
+        let last_editor_width = self.last_frame.as_ref().and_then(|f| {
+            f.viewport
+                .map(|v| v.text_area.width as usize)
+                .or_else(|| f.wrapped_layout.as_ref().map(|wl| wl.viewport_width))
+        });
+
+        let (viewport, mut wrapped_layout) = if let Some(editor_rect) = regions.editor {
             let (metrics, layout) =
                 render_editor_viewport(frame, editor_rect, &mut self.state, self.follow_cursor);
             (Some(metrics), Some(layout))
@@ -156,6 +163,28 @@ impl TuiApp {
             wl.visual_lines
                 .get(self.state.buffers.active().scroll_line)
                 .map_or(0, |vl| vl.logical_line)
+        } else if let Some(preview_rect) = regions.preview {
+            let fallback_width = last_editor_width
+                .unwrap_or_else(|| preview_rect.width.max(1) as usize)
+                .max(1);
+            let tab_width = match self.state.config.indent.style {
+                IndentStyle::Spaces(w) => w.max(1) as usize,
+                IndentStyle::Tabs => 4,
+            };
+            let active = self.state.buffers.active();
+            let layout = compute_wrapped_layout(
+                &active.document,
+                fallback_width,
+                self.state.config.soft_wrap,
+                tab_width,
+            );
+            let top_line = layout
+                .visual_lines
+                .get(active.scroll_line)
+                .or_else(|| layout.visual_lines.last())
+                .map_or(0, |vl| vl.logical_line);
+            wrapped_layout = Some(layout);
+            top_line
         } else {
             self.state.buffers.active().scroll_line
         };
@@ -1113,5 +1142,40 @@ mod tests {
         assert!(app.state.find_replace.matches.is_empty());
         assert_eq!(app.state.find_replace.active_match, None);
         assert_eq!(app.find_bar.focus, FindFocus::Query);
+    }
+
+    #[test]
+    fn expanded_preview_scroll_sync_maps_visual_scroll_to_logical_line() {
+        use scriptui_core::PreviewMode;
+
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+
+        // Line 0: long wrapped paragraph; Line 1: heading; followed by enough lines to scroll.
+        let long_para = "word ".repeat(60);
+        let mut content = format!("{long_para}\n# Heading On Line One\n");
+        for idx in 0..20 {
+            content.push_str(&format!("\nParagraph line {idx}\n"));
+        }
+        app.state.insert_text(&content);
+        app.state.config.soft_wrap = true;
+        app.state.preview_mode = PreviewMode::Expanded;
+        app.state.buffers.active_mut().scroll_line = 2;
+
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render_frame should succeed");
+
+        assert_eq!(
+            app.preview_pane.scroll_line, 0,
+            "scroll_line=2 inside wrapped paragraph on logical line 0 should map to source line 0"
+        );
     }
 }
