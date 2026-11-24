@@ -12,6 +12,7 @@ use crate::selection::{Position, Selection, SelectionSet};
 static NEXT_DOCUMENT_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 const MAX_TEMP_CREATE_ATTEMPTS: usize = 128;
+pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 fn next_document_id() -> u64 {
     NEXT_DOCUMENT_ID.fetch_add(1, Ordering::Relaxed)
@@ -114,13 +115,28 @@ impl DocumentBuffer {
     }
 
     pub fn from_file(path: &Path) -> ScriptuiResult<Self> {
+        let meta = fs::metadata(path).map_err(|source| ScriptuiError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(ScriptuiError::Io {
+                path: path.to_path_buf(),
+                source: io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "file size {} bytes exceeds maximum allowed size of {} bytes",
+                        meta.len(),
+                        MAX_FILE_BYTES
+                    ),
+                ),
+            });
+        }
         let content = fs::read_to_string(path).map_err(|source| ScriptuiError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-        let last_disk_mtime = fs::metadata(path)
-            .ok()
-            .and_then(|meta| meta.modified().ok());
+        let last_disk_mtime = meta.modified().ok();
 
         Ok(Self {
             doc_id: next_document_id(),
@@ -299,6 +315,9 @@ impl DocumentBuffer {
         let mut edits = Vec::with_capacity(spans.len());
 
         for &(start, end) in spans.iter().rev() {
+            if text.is_empty() && start == end {
+                continue;
+            }
             let removed = self.rope.slice(start..end).to_string();
             if start < end {
                 self.rope.remove(start..end);
@@ -560,5 +579,14 @@ mod tests {
         let mut expected = vec![target, legacy_stale, colliding_tmp];
         expected.sort();
         assert_eq!(remaining, expected);
+    }
+
+    #[test]
+    fn empty_insert_on_point_selection_returns_no_edits() {
+        let mut buf = DocumentBuffer::empty();
+        let edits = buf.apply_insert("");
+        assert!(edits.is_empty());
+        assert!(!buf.is_dirty());
+        assert_eq!(buf.revision(), 0);
     }
 }

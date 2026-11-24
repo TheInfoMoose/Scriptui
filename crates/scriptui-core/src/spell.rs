@@ -209,17 +209,32 @@ impl SpellEngine {
         let dic_name = format!("{locale}.dic");
 
         for dir in search_dirs {
+            let Ok(canonical_dir) = fs::canonicalize(dir) else {
+                continue;
+            };
             let aff_path = dir.join(&aff_name);
             let dic_path = dir.join(&dic_name);
             if aff_path.is_file() && dic_path.is_file() {
-                let aff = fs::read_to_string(&aff_path).map_err(|source| ScriptuiError::Io {
-                    path: aff_path,
-                    source,
-                })?;
-                let dic = fs::read_to_string(&dic_path).map_err(|source| ScriptuiError::Io {
-                    path: dic_path,
-                    source,
-                })?;
+                let (Ok(canonical_aff), Ok(canonical_dic)) =
+                    (fs::canonicalize(&aff_path), fs::canonicalize(&dic_path))
+                else {
+                    continue;
+                };
+                if !canonical_aff.starts_with(&canonical_dir)
+                    || !canonical_dic.starts_with(&canonical_dir)
+                {
+                    continue;
+                }
+                let aff =
+                    fs::read_to_string(&canonical_aff).map_err(|source| ScriptuiError::Io {
+                        path: canonical_aff,
+                        source,
+                    })?;
+                let dic =
+                    fs::read_to_string(&canonical_dic).map_err(|source| ScriptuiError::Io {
+                        path: canonical_dic,
+                        source,
+                    })?;
                 let dict = spellbook::Dictionary::new(&aff, &dic).map_err(|err| {
                     ScriptuiError::SpellDict {
                         locale: locale.to_string(),
@@ -436,6 +451,17 @@ pub fn import_locale_files(
     let dic_dest = dest_dir.join(&dic_name);
     let aff_dest = dest_dir.join(&aff_name);
 
+    let prior_dic_bytes = match fs::read(&dic_dest) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(source) => {
+            return Err(ScriptuiError::Io {
+                path: dic_dest,
+                source,
+            });
+        }
+    };
+
     let dic_tmp = write_unique_temp_file(dest_dir, &dic_name, |file| {
         file.write_all(dic_content.as_bytes())
     })?;
@@ -460,6 +486,11 @@ pub fn import_locale_files(
 
     if let Err(source) = fs::rename(&aff_tmp, &aff_dest) {
         let _ = fs::remove_file(&aff_tmp);
+        if let Some(prior_bytes) = prior_dic_bytes {
+            let _ = fs::write(&dic_dest, prior_bytes);
+        } else {
+            let _ = fs::remove_file(&dic_dest);
+        }
         return Err(ScriptuiError::Io {
             path: aff_dest,
             source,
@@ -645,5 +676,58 @@ mod tests {
             dest_entries,
             vec!["de_DE.aff".to_string(), "de_DE.dic".to_string()]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_locale_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let dict_dir = root.path().join("dicts");
+        fs::create_dir_all(&dict_dir).unwrap();
+
+        let outside_aff = root.path().join("outside.aff");
+        let outside_dic = root.path().join("outside.dic");
+        fs::write(&outside_aff, "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n").unwrap();
+        fs::write(&outside_dic, "1\nbonjour\n").unwrap();
+
+        symlink(&outside_aff, dict_dir.join("es_ES.aff")).unwrap();
+        symlink(&outside_dic, dict_dir.join("es_ES.dic")).unwrap();
+
+        let result = SpellEngine::load_locale("es_ES", std::slice::from_ref(&dict_dir));
+        assert!(matches!(result, Err(ScriptuiError::SpellDict { .. })));
+    }
+
+    #[test]
+    fn import_locale_files_rolls_back_dic_on_aff_rename_failure() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let aff_src = src_dir.path().join("it_IT.aff");
+        let dic_src = src_dir.path().join("it_IT.dic");
+        fs::write(&aff_src, "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n").unwrap();
+        fs::write(&dic_src, "1\nciao\n").unwrap();
+
+        // Case 1: dic_dest did not previously exist -> removed on aff rename failure.
+        let dest_fresh = tempfile::tempdir().unwrap();
+        let aff_blocker = dest_fresh.path().join("it_IT.aff");
+        fs::create_dir_all(&aff_blocker).unwrap();
+        fs::write(aff_blocker.join("keep"), "block rename").unwrap();
+
+        let err = import_locale_files("it_IT", &dic_src, &aff_src, dest_fresh.path()).unwrap_err();
+        assert!(matches!(err, ScriptuiError::Io { .. }));
+        assert!(!dest_fresh.path().join("it_IT.dic").exists());
+
+        // Case 2: dic_dest existed beforehand -> restored to prior content on aff rename failure.
+        let dest_existing = tempfile::tempdir().unwrap();
+        let prior_dic = dest_existing.path().join("it_IT.dic");
+        fs::write(&prior_dic, "1\nprecedente\n").unwrap();
+        let aff_blocker_existing = dest_existing.path().join("it_IT.aff");
+        fs::create_dir_all(&aff_blocker_existing).unwrap();
+        fs::write(aff_blocker_existing.join("keep"), "block rename").unwrap();
+
+        let err =
+            import_locale_files("it_IT", &dic_src, &aff_src, dest_existing.path()).unwrap_err();
+        assert!(matches!(err, ScriptuiError::Io { .. }));
+        assert_eq!(fs::read_to_string(&prior_dic).unwrap(), "1\nprecedente\n");
     }
 }

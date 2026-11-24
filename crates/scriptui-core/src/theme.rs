@@ -313,9 +313,17 @@ pub fn resolve_theme(name: &str, search_dirs: &[PathBuf]) -> ScriptuiResult<Them
     }
 
     for dir in search_dirs {
+        let Ok(canonical_dir) = std::fs::canonicalize(dir) else {
+            continue;
+        };
         let candidate = dir.join(format!("{name}.toml"));
         if candidate.is_file() {
-            return load_theme_file(&candidate);
+            let Ok(canonical_candidate) = std::fs::canonicalize(&candidate) else {
+                continue;
+            };
+            if canonical_candidate.starts_with(&canonical_dir) {
+                return load_theme_file(&canonical_candidate);
+            }
         }
     }
 
@@ -397,5 +405,37 @@ mod tests {
                 "expected UnknownTheme for {invalid:?}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_theme_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let theme_dir = root.path().join("themes");
+        std::fs::create_dir_all(&theme_dir).unwrap();
+
+        let outside_toml = DEFAULT_CRT_AMBER_TOML.replace(
+            "foreground = { r = 255, g = 176, b = 0 }",
+            "foreground = { r = 1, g = 2, b = 3 }",
+        );
+        let outside_path = root.path().join("outside.toml");
+        std::fs::write(&outside_path, outside_toml).unwrap();
+
+        symlink(&outside_path, theme_dir.join("escaped.toml")).unwrap();
+        let err = resolve_theme("escaped", std::slice::from_ref(&theme_dir)).unwrap_err();
+        assert!(matches!(err, ScriptuiError::UnknownTheme(name) if name == "escaped"));
+
+        symlink(&outside_path, theme_dir.join("crt_amber.toml")).unwrap();
+        let fallback = resolve_theme("crt_amber", std::slice::from_ref(&theme_dir)).unwrap();
+        assert_eq!(
+            fallback.palette.foreground,
+            RgbColor {
+                r: 255,
+                g: 176,
+                b: 0
+            }
+        );
     }
 }
