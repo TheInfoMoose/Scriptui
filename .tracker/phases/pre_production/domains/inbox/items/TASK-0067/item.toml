@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0067"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:40:46Z"
-updated_at = "2026-11-24T04:40:46Z"
+updated_at = "2026-11-24T05:03:07Z"
 source_ref = "STEP 12C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0067@2026-11-24T05:00:02Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "b0addbd"
+summary = "STEP 12C: Clean-Point Undo `dirty` Tracking, Internal `Ctrl+V` Clipboard & `EditorState::new_with_dirs` (`BUG-0019`, `BUG-0020` part 2, `BUG-0018` core) (phased check PASS)"
