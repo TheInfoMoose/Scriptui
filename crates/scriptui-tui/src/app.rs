@@ -24,8 +24,8 @@ use crate::modals::{
 };
 use crate::mouse::{is_over_preview, MouseContext, MouseRouter};
 use crate::palette::{
-    build_palette_entries, discover_installed_locales, handle_palette_key, render_command_palette,
-    PaletteEntry,
+    build_palette_entries_with_themes, discover_custom_themes, discover_installed_locales,
+    handle_palette_key, render_command_palette, PaletteEntry,
 };
 use crate::preview_pane::{render_preview_pane, PreviewPaneState};
 use crate::terminal::{crossterm_key_to_chord, write_osc52_clipboard, TerminalGuard};
@@ -64,8 +64,17 @@ pub struct TuiApp {
 
 impl TuiApp {
     pub fn from_cli(cli: &Cli) -> ScriptuiResult<Self> {
-        let config_path = AppConfig::default_config_dir().join("config.toml");
-        let mut config = AppConfig::load_or_default(&config_path).unwrap_or_default();
+        let config_dir = AppConfig::default_config_dir();
+        let theme_dirs = [config_dir.join("themes")];
+        let dict_dirs = [config_dir.join("dicts")];
+        let config_path = config_dir.join("config.toml");
+        let (mut config, config_warning) = match AppConfig::load_or_default(&config_path) {
+            Ok(cfg) => (cfg, None),
+            Err(err) => (
+                AppConfig::default(),
+                Some(format!("Config error ({}): {err}", config_path.display())),
+            ),
+        };
         if let Some(theme) = &cli.theme {
             config.theme = theme.clone();
         }
@@ -73,9 +82,15 @@ impl TuiApp {
             config.spell_locale = locale.clone();
         }
 
-        let mut state = EditorState::new(config)?;
+        let mut state = EditorState::new_with_dirs(config, &theme_dirs, &dict_dirs)?;
+        if let Some(warning) = config_warning {
+            state.status_message = Some(match state.status_message.take() {
+                Some(existing) if !existing.is_empty() => format!("{warning}; {existing}"),
+                _ => warning,
+            });
+        }
         for path in &cli.files {
-            state.buffers.open_file(path)?;
+            state.buffers.open_or_create_file(path)?;
         }
 
         Ok(Self {
@@ -90,9 +105,12 @@ impl TuiApp {
     }
 
     pub fn refresh_palette_entries(&mut self) {
-        let dict_dirs = [AppConfig::default_config_dir().join("dicts")];
+        let config_dir = AppConfig::default_config_dir();
+        let theme_dirs = [config_dir.join("themes")];
+        let dict_dirs = [config_dir.join("dicts")];
+        let custom_themes = discover_custom_themes(&theme_dirs);
         let locales = discover_installed_locales(&dict_dirs);
-        self.palette_entries = build_palette_entries(&locales);
+        self.palette_entries = build_palette_entries_with_themes(&custom_themes, &locales);
     }
 
     pub fn render_frame(&mut self, frame: &mut Frame) {
@@ -174,7 +192,7 @@ impl TuiApp {
         key: KeyEvent,
         clipboard_out: &mut W,
     ) -> ScriptuiResult<()> {
-        if key.kind != KeyEventKind::Press {
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return Ok(());
         }
         self.follow_cursor = true;
@@ -229,6 +247,7 @@ impl TuiApp {
                             }
                         })?;
                     }
+                    self.state.dispatch(Action::Copy)?;
                 }
                 Action::Cut => {
                     let selected = self.state.selected_text();
@@ -796,5 +815,70 @@ mod tests {
         app.handle_paste_event("ignored")
             .expect("paste in confirm modal should be ignored");
         assert_eq!(app.state.buffers.active().document.text(), "line1\nline2");
+    }
+
+    #[test]
+    fn tui_app_handles_repeat_keys_ctrl_c_v_and_nonexistent_cli_file() {
+        let dir = tempfile::tempdir().expect("tempdir should succeed");
+        let missing_path = dir.path().join("fresh.md");
+
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: vec![missing_path.clone()],
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should open missing file as clean");
+        assert!(!app.state.buffers.active().is_dirty());
+        assert_eq!(
+            app.state.buffers.active().document.path(),
+            Some(missing_path.as_path())
+        );
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new_with_kind(KeyCode::Char('a'), KeyModifiers::NONE, KeyEventKind::Repeat),
+            &mut clipboard_buf,
+        )
+        .expect("repeat key should insert char");
+        app.handle_key_event(
+            KeyEvent::new_with_kind(
+                KeyCode::Char('b'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            &mut clipboard_buf,
+        )
+        .expect("release key should be ignored");
+        assert_eq!(app.state.buffers.active().document.text(), "a");
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+A should select all");
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+C should copy");
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("End should move cursor to end");
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+V should paste");
+
+        assert_eq!(app.state.buffers.active().document.text(), "aa");
+        let clipboard_str =
+            String::from_utf8(clipboard_buf).expect("OSC 52 output should be valid UTF-8");
+        assert!(
+            clipboard_str.contains("YQ=="),
+            "expected OSC 52 buffer to contain base64 'YQ==', got {clipboard_str:?}"
+        );
     }
 }

@@ -1,8 +1,9 @@
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use crate::buffer::DocumentBuffer;
-use crate::error::ScriptuiResult;
+use crate::error::{ScriptuiError, ScriptuiResult};
 use crate::history::UndoStack;
 
 pub type BufferId = usize;
@@ -119,7 +120,21 @@ impl BufferManager {
         }
 
         let document = DocumentBuffer::from_file(path)?;
+        Ok(self.insert_document(document))
+    }
 
+    pub fn open_or_create_file(&mut self, path: &Path) -> ScriptuiResult<BufferId> {
+        match self.open_file(path) {
+            Ok(id) => Ok(id),
+            Err(ScriptuiError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                let document = DocumentBuffer::empty_with_path(path.to_path_buf());
+                Ok(self.insert_document(document))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn insert_document(&mut self, document: DocumentBuffer) -> BufferId {
         let replace_initial = self.buffers.len() == 1
             && !self.buffers[0].is_dirty()
             && self.buffers[0].document.path().is_none()
@@ -133,7 +148,7 @@ impl BufferManager {
             first.scroll_col = 0;
             first.external_change_pending = false;
             self.active_index = 0;
-            return Ok(first.id);
+            return first.id;
         }
 
         let id = self.next_id;
@@ -147,7 +162,7 @@ impl BufferManager {
             external_change_pending: false,
         });
         self.active_index = self.buffers.len() - 1;
-        Ok(id)
+        id
     }
 
     pub fn switch_to(&mut self, index: usize) -> bool {
@@ -300,5 +315,24 @@ mod tests {
         assert!(mgr.reload_active_from_disk().unwrap());
         assert_eq!(mgr.active().document.text(), "updated content from disk\n");
         assert!(!mgr.active().external_change_pending);
+    }
+
+    #[test]
+    fn open_or_create_file_creates_clean_named_buffer_for_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let nonexistent_path = dir.path().join("new_note.md");
+
+        let mut mgr = BufferManager::new();
+        let id = mgr.open_or_create_file(&nonexistent_path).unwrap();
+        assert_eq!(mgr.len(), 1);
+        assert!(!mgr.active().is_dirty());
+        assert_eq!(
+            mgr.active().document.path(),
+            Some(nonexistent_path.as_path())
+        );
+
+        let id_again = mgr.open_or_create_file(&nonexistent_path).unwrap();
+        assert_eq!(id_again, id);
+        assert_eq!(mgr.len(), 1);
     }
 }

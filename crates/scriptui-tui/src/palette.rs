@@ -58,7 +58,46 @@ pub fn discover_installed_locales(dict_dirs: &[PathBuf]) -> Vec<String> {
     locales.into_iter().collect()
 }
 
+pub fn discover_custom_themes(theme_dirs: &[PathBuf]) -> Vec<String> {
+    let mut themes = BTreeSet::new();
+
+    for dir in theme_dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let is_toml = path.extension().and_then(|ext| ext.to_str()) == Some("toml");
+            if !is_toml {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !stem.is_empty()
+                && stem
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                themes.insert(stem.to_string());
+            }
+        }
+    }
+
+    themes.into_iter().collect()
+}
+
 pub fn build_palette_entries(extra_locales: &[String]) -> Vec<PaletteEntry> {
+    build_palette_entries_with_themes(&[], extra_locales)
+}
+
+pub fn build_palette_entries_with_themes(
+    extra_themes: &[String],
+    extra_locales: &[String],
+) -> Vec<PaletteEntry> {
     let mut entries: Vec<PaletteEntry> = CommandPaletteState::default_commands()
         .into_iter()
         .map(|cmd| PaletteEntry {
@@ -74,12 +113,23 @@ pub fn build_palette_entries(extra_locales: &[String]) -> Vec<PaletteEntry> {
         kind: PaletteItemKind::ToggleIndentStyle,
     });
 
+    let mut seen_themes = HashSet::new();
     for &name in builtin_theme_names() {
+        seen_themes.insert(name.to_string());
         entries.push(PaletteEntry {
             id: format!("theme.{name}"),
             label: format!("Theme: {name}"),
             kind: PaletteItemKind::Theme(name.to_string()),
         });
+    }
+    for name in extra_themes {
+        if !name.is_empty() && seen_themes.insert(name.clone()) {
+            entries.push(PaletteEntry {
+                id: format!("theme.{name}"),
+                label: format!("Theme: {name}"),
+                kind: PaletteItemKind::Theme(name.clone()),
+            });
+        }
     }
 
     let mut seen_locales = HashSet::new();
@@ -384,5 +434,23 @@ mod tests {
         assert!(handled);
         assert_eq!(state.theme.name, "phosphor_green");
         assert_eq!(state.overlay, OverlayMode::None);
+    }
+
+    #[test]
+    fn discover_custom_themes_and_palette_entries_include_custom_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("solarized.toml"), "name = \"solarized\"\n").unwrap();
+        std::fs::write(dir.path().join("bad name.toml"), "name = \"bad\"\n").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "ignored\n").unwrap();
+
+        let discovered = discover_custom_themes(&[dir.path().to_path_buf()]);
+        assert_eq!(discovered, vec!["solarized".to_string()]);
+
+        let entries = build_palette_entries_with_themes(&discovered, &[]);
+        assert!(entries.iter().any(|entry| {
+            entry.id == "theme.solarized"
+                && entry.label == "Theme: solarized"
+                && entry.kind == PaletteItemKind::Theme("solarized".to_string())
+        }));
     }
 }
