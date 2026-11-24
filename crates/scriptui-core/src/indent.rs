@@ -72,23 +72,19 @@ pub fn compute_enter_indent(
 }
 
 fn parse_task_list(leading: &str, trimmed: &str) -> Option<EnterOutcome> {
-    let bytes = trimmed.as_bytes();
-    if bytes.len() < 6 {
+    let first = trimmed.as_bytes().first().copied()?;
+    if !matches!(first, b'-' | b'*' | b'+') {
         return None;
     }
-    let marker = bytes[0];
-    if !matches!(marker, b'-' | b'*' | b'+') {
-        return None;
-    }
-    let checkbox = &trimmed[1..6];
-    if !matches!(checkbox, " [ ] " | " [x] " | " [X] ") {
-        return None;
-    }
-    let rest = &trimmed[6..];
+    let after_marker = &trimmed[1..];
+    let rest = after_marker
+        .strip_prefix(" [ ] ")
+        .or_else(|| after_marker.strip_prefix(" [x] "))
+        .or_else(|| after_marker.strip_prefix(" [X] "))?;
     if rest.trim().is_empty() {
         Some(EnterOutcome::ClearCurrentLine)
     } else {
-        let marker_char = marker as char;
+        let marker_char = first as char;
         Some(EnterOutcome::Insert(format!(
             "\n{leading}{marker_char} [ ] "
         )))
@@ -278,5 +274,26 @@ mod tests {
         let dedent_edits = dedent_lines(&mut buf, 0, 1, cfg).unwrap();
         assert_eq!(dedent_edits.len(), 2);
         assert_eq!(buf.text(), "a\nb\nc");
+    }
+
+    #[test]
+    fn task_list_multibyte_utf8_at_byte_six_does_not_panic() {
+        let cfg = IndentConfig::default();
+        assert_eq!(
+            compute_enter_indent("-    é", false, cfg),
+            EnterOutcome::Insert("\n- ".to_string())
+        );
+        assert_eq!(
+            compute_enter_indent("-   é", false, cfg),
+            EnterOutcome::Insert("\n- ".to_string())
+        );
+        assert_eq!(
+            compute_enter_indent("- é", false, cfg),
+            EnterOutcome::Insert("\n- ".to_string())
+        );
+        assert_eq!(
+            compute_enter_indent("*  日本語", false, cfg),
+            EnterOutcome::Insert("\n* ".to_string())
+        );
     }
 }

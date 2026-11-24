@@ -1,11 +1,79 @@
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{ScriptuiError, ScriptuiResult};
+
+static NEXT_SPELL_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+const MAX_TEMP_CREATE_ATTEMPTS: usize = 128;
+
+fn create_unique_temp_file(parent: &Path, file_name: &str) -> ScriptuiResult<(PathBuf, File)> {
+    let pid = std::process::id();
+    let mut last_path = PathBuf::new();
+
+    for _ in 0..MAX_TEMP_CREATE_ATTEMPTS {
+        let seq = NEXT_SPELL_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        let tmp_name = format!("{file_name}.scriptui.tmp.{pid}.{seq}");
+        let tmp_path = if parent.as_os_str().is_empty() {
+            PathBuf::from(tmp_name)
+        } else {
+            parent.join(tmp_name)
+        };
+
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                last_path = tmp_path;
+            }
+            Err(source) => {
+                return Err(ScriptuiError::Io {
+                    path: tmp_path,
+                    source,
+                });
+            }
+        }
+    }
+
+    Err(ScriptuiError::Io {
+        path: last_path,
+        source: io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "failed to create unique temporary file after bounded retries",
+        ),
+    })
+}
+
+fn write_unique_temp_file(
+    parent: &Path,
+    file_name: &str,
+    write_fn: impl FnOnce(&mut File) -> io::Result<()>,
+) -> ScriptuiResult<PathBuf> {
+    let (tmp_path, mut file) = create_unique_temp_file(parent, file_name)?;
+    let write_result = (|| -> io::Result<()> {
+        write_fn(&mut file)?;
+        file.flush()?;
+        file.sync_all()?;
+        Ok(())
+    })();
+
+    drop(file);
+    if let Err(source) = write_result {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(ScriptuiError::Io {
+            path: tmp_path,
+            source,
+        });
+    }
+    Ok(tmp_path)
+}
 
 pub const DEFAULT_LOCALE: &str = "en_US";
 
@@ -71,30 +139,13 @@ impl PersonalDictionary {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("personal_dict");
-        let tmp_name = format!("{file_name}.scriptui.tmp.{}", std::process::id());
-        let tmp_path = if parent.as_os_str().is_empty() {
-            PathBuf::from(tmp_name)
-        } else {
-            parent.join(tmp_name)
-        };
 
-        let write_result = (|| -> io::Result<()> {
-            let mut file = File::create(&tmp_path)?;
+        let tmp_path = write_unique_temp_file(parent, file_name, |file| {
             for word in &self.words {
                 writeln!(file, "{word}")?;
             }
-            file.flush()?;
-            file.sync_all()?;
             Ok(())
-        })();
-
-        if let Err(source) = write_result {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(ScriptuiError::Io {
-                path: tmp_path,
-                source,
-            });
-        }
+        })?;
 
         if let Err(source) = fs::rename(&tmp_path, path) {
             let _ = fs::remove_file(&tmp_path);
@@ -380,17 +431,40 @@ pub fn import_locale_files(
         source,
     })?;
 
-    let dic_dest = dest_dir.join(format!("{locale}.dic"));
-    let aff_dest = dest_dir.join(format!("{locale}.aff"));
+    let dic_name = format!("{locale}.dic");
+    let aff_name = format!("{locale}.aff");
+    let dic_dest = dest_dir.join(&dic_name);
+    let aff_dest = dest_dir.join(&aff_name);
 
-    fs::write(&dic_dest, &dic_content).map_err(|source| ScriptuiError::Io {
-        path: dic_dest.clone(),
-        source,
+    let dic_tmp = write_unique_temp_file(dest_dir, &dic_name, |file| {
+        file.write_all(dic_content.as_bytes())
     })?;
-    fs::write(&aff_dest, &aff_content).map_err(|source| ScriptuiError::Io {
-        path: aff_dest.clone(),
-        source,
-    })?;
+    let aff_tmp = match write_unique_temp_file(dest_dir, &aff_name, |file| {
+        file.write_all(aff_content.as_bytes())
+    }) {
+        Ok(path) => path,
+        Err(err) => {
+            let _ = fs::remove_file(&dic_tmp);
+            return Err(err);
+        }
+    };
+
+    if let Err(source) = fs::rename(&dic_tmp, &dic_dest) {
+        let _ = fs::remove_file(&dic_tmp);
+        let _ = fs::remove_file(&aff_tmp);
+        return Err(ScriptuiError::Io {
+            path: dic_dest,
+            source,
+        });
+    }
+
+    if let Err(source) = fs::rename(&aff_tmp, &aff_dest) {
+        let _ = fs::remove_file(&aff_tmp);
+        return Err(ScriptuiError::Io {
+            path: aff_dest,
+            source,
+        });
+    }
 
     Ok((dic_dest, aff_dest))
 }
@@ -527,6 +601,49 @@ mod tests {
         assert!(
             suggestions.iter().any(|s| s == "don't"),
             "expected \"don't\" in suggestions, got {suggestions:?}"
+        );
+    }
+
+    #[test]
+    fn personal_dict_and_locale_import_use_atomic_o_excl_writes() {
+        let dict_dir = tempfile::tempdir().unwrap();
+        let dict_path = dict_dir.path().join("personal.dic");
+
+        let mut personal = PersonalDictionary::default();
+        personal.add("scriptui");
+        personal.add("testuser");
+        personal.save_to_file(&dict_path).unwrap();
+
+        let reloaded = PersonalDictionary::load_from_file(&dict_path).unwrap();
+        assert!(reloaded.contains("scriptui"));
+        assert!(reloaded.contains("testuser"));
+
+        let dict_entries: Vec<String> = fs::read_dir(dict_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(dict_entries, vec!["personal.dic".to_string()]);
+
+        let src_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        let aff_src = src_dir.path().join("de_DE.aff");
+        let dic_src = src_dir.path().join("de_DE.dic");
+        fs::write(&aff_src, "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n").unwrap();
+        fs::write(&dic_src, "1\nhallo\n").unwrap();
+
+        let (dic_dest, aff_dest) =
+            import_locale_files("de_DE", &dic_src, &aff_src, dest_dir.path()).unwrap();
+        assert!(dic_dest.is_file());
+        assert!(aff_dest.is_file());
+
+        let mut dest_entries: Vec<String> = fs::read_dir(dest_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        dest_entries.sort();
+        assert_eq!(
+            dest_entries,
+            vec!["de_DE.aff".to_string(), "de_DE.dic".to_string()]
         );
     }
 }

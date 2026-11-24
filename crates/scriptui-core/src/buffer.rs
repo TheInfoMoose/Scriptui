@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,9 +10,51 @@ use crate::error::{ScriptuiError, ScriptuiResult};
 use crate::selection::{Position, Selection, SelectionSet};
 
 static NEXT_DOCUMENT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
+const MAX_TEMP_CREATE_ATTEMPTS: usize = 128;
 
 fn next_document_id() -> u64 {
     NEXT_DOCUMENT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn create_unique_temp_file(parent: &Path, file_name: &str) -> ScriptuiResult<(PathBuf, File)> {
+    let pid = std::process::id();
+    let mut last_path = PathBuf::new();
+
+    for _ in 0..MAX_TEMP_CREATE_ATTEMPTS {
+        let seq = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+        let tmp_name = format!("{file_name}.scriptui.tmp.{pid}.{seq}");
+        let tmp_path = if parent.as_os_str().is_empty() {
+            PathBuf::from(tmp_name)
+        } else {
+            parent.join(tmp_name)
+        };
+
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                last_path = tmp_path;
+            }
+            Err(source) => {
+                return Err(ScriptuiError::Io {
+                    path: tmp_path,
+                    source,
+                });
+            }
+        }
+    }
+
+    Err(ScriptuiError::Io {
+        path: last_path,
+        source: io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "failed to create unique temporary file after bounded retries",
+        ),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +82,18 @@ impl DocumentBuffer {
             doc_id: next_document_id(),
             rope: Rope::new(),
             path: None,
+            dirty: false,
+            last_disk_mtime: None,
+            selection: SelectionSet::point(0),
+            revision: 0,
+        }
+    }
+
+    pub fn empty_with_path(path: PathBuf) -> Self {
+        Self {
+            doc_id: next_document_id(),
+            rope: Rope::new(),
+            path: Some(path),
             dirty: false,
             last_disk_mtime: None,
             selection: SelectionSet::point(0),
@@ -98,21 +152,16 @@ impl DocumentBuffer {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("buffer");
-        let tmp_name = format!("{file_name}.scriptui.tmp.{}", std::process::id());
-        let tmp_path = if parent.as_os_str().is_empty() {
-            PathBuf::from(tmp_name)
-        } else {
-            parent.join(tmp_name)
-        };
+        let (tmp_path, mut file) = create_unique_temp_file(parent, file_name)?;
 
         let write_result = (|| -> io::Result<()> {
-            let mut file = File::create(&tmp_path)?;
             self.rope.write_to(&mut file)?;
             file.flush()?;
             file.sync_all()?;
             Ok(())
         })();
 
+        drop(file);
         if let Err(source) = write_result {
             let _ = fs::remove_file(&tmp_path);
             return Err(ScriptuiError::Io {
@@ -276,12 +325,12 @@ impl DocumentBuffer {
 
         self.selection = SelectionSet::from_ranges(new_ranges);
         self.selection.clamp(self.len_chars());
-        self.dirty = true;
         if !edits.is_empty()
             && edits
                 .iter()
                 .any(|edit| edit.start < edit.end || !text.is_empty())
         {
+            self.dirty = true;
             self.revision = self.revision.wrapping_add(1);
         }
         edits
@@ -457,5 +506,59 @@ mod tests {
 
         buf.set_selection(SelectionSet::point(0));
         assert_eq!(buf.revision(), 3);
+    }
+
+    #[test]
+    fn empty_insert_does_not_mark_buffer_dirty_and_empty_with_path_is_clean() {
+        let mut buf = DocumentBuffer::empty_with_path(PathBuf::from("new.md"));
+        assert!(!buf.is_dirty());
+        assert_eq!(buf.path(), Some(Path::new("new.md")));
+        assert_eq!(buf.revision(), 0);
+
+        let _ = buf.apply_insert("");
+        assert!(!buf.is_dirty());
+        assert_eq!(buf.revision(), 0);
+    }
+
+    #[test]
+    fn save_atomic_skips_preexisting_temp_collision_with_o_excl() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("sample.txt");
+
+        let pid = std::process::id();
+        let legacy_stale = dir.path().join(format!("sample.txt.scriptui.tmp.{pid}"));
+        std::fs::write(&legacy_stale, "legacy stale").unwrap();
+
+        let next_seq = NEXT_TEMP_FILE_ID.load(Ordering::Relaxed);
+        let colliding_tmp = dir
+            .path()
+            .join(format!("sample.txt.scriptui.tmp.{pid}.{next_seq}"));
+        std::fs::write(&colliding_tmp, "preexisting collision").unwrap();
+
+        let mut buf = DocumentBuffer::from_str_content("atomic content\n");
+        buf.save_as_atomic(target.clone()).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "atomic content\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&legacy_stale).unwrap(),
+            "legacy stale"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&colliding_tmp).unwrap(),
+            "preexisting collision"
+        );
+
+        let mut remaining: Vec<PathBuf> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        remaining.sort();
+
+        let mut expected = vec![target, legacy_stale, colliding_tmp];
+        expected.sort();
+        assert_eq!(remaining, expected);
     }
 }
