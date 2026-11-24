@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0070"
 type = "task"
 title = "tui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:40:46Z"
-updated_at = "2026-11-24T04:40:46Z"
+updated_at = "2026-11-24T05:11:35Z"
 source_ref = "STEP 12F"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 2
 iteration_count = 1
+last_timer_session = "TASK-0070@2026-11-24T05:09:18Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "213e951"
+summary = "STEP 12F: Unix Signal Handling (`SIGTERM`/`SIGHUP`/`SIGTSTP`) & Alt-Screen Exit Error Ordering (`BUG-0024`) (phased check PASS)"
