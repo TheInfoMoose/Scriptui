@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0075"
 type = "task"
 title = "preview"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T05:39:37Z"
-updated_at = "2026-11-24T05:39:37Z"
+updated_at = "2026-11-24T06:05:31Z"
 source_ref = "STEP 13E"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 4
 iteration_count = 1
+last_timer_session = "TASK-0075@2026-11-24T06:00:39Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "489e5f2"
+summary = "STEP 13E: `PreviewMode::Expanded` Scroll Sync & `unicode_width` Table/Preview Layout (phased check PASS)"
