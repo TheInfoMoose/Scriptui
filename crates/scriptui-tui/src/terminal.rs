@@ -175,6 +175,12 @@ fn restore_terminal_best_effort() {
 }
 
 pub fn crossterm_key_to_chord(event: KeyEvent) -> Option<KeyChord> {
+    if event.modifiers.intersects(
+        CrosstermKeyModifiers::SUPER | CrosstermKeyModifiers::HYPER | CrosstermKeyModifiers::META,
+    ) {
+        return None;
+    }
+
     let code = match event.code {
         CrosstermKeyCode::Char(c) => KeyCode::Char(c),
         CrosstermKeyCode::Enter => KeyCode::Enter,
@@ -239,7 +245,12 @@ pub fn encode_osc52_clipboard(text: &str) -> String {
     format!("\x1b]52;c;{encoded}\x07")
 }
 
+pub const MAX_OSC52_BYTES: usize = 74_994;
+
 pub fn write_osc52_clipboard<W: Write>(writer: &mut W, text: &str) -> io::Result<()> {
+    if text.len() > MAX_OSC52_BYTES {
+        return Ok(());
+    }
     let sequence = encode_osc52_clipboard(text);
     writer.write_all(sequence.as_bytes())?;
     writer.flush()
@@ -292,5 +303,32 @@ mod tests {
         flags.suspend.store(true, Ordering::SeqCst);
         assert!(flags.take_suspend());
         assert!(!flags.take_suspend());
+    }
+
+    #[test]
+    fn crossterm_key_to_chord_ignores_super_hyper_meta() {
+        for modifier in [
+            CrosstermKeyModifiers::SUPER,
+            CrosstermKeyModifiers::HYPER,
+            CrosstermKeyModifiers::META,
+        ] {
+            let char_ev = KeyEvent::new(CrosstermKeyCode::Char('s'), modifier);
+            assert_eq!(crossterm_key_to_chord(char_ev), None);
+
+            let left_ev = KeyEvent::new(CrosstermKeyCode::Left, modifier);
+            assert_eq!(crossterm_key_to_chord(left_ev), None);
+        }
+    }
+
+    #[test]
+    fn write_osc52_clipboard_skips_oversized_payload() {
+        let oversized = "a".repeat(MAX_OSC52_BYTES + 1);
+        let mut buffer = Vec::new();
+        write_osc52_clipboard(&mut buffer, &oversized)
+            .expect("oversized OSC 52 write should return Ok(())");
+        assert!(buffer.is_empty());
+
+        write_osc52_clipboard(&mut buffer, "hello").expect("normal OSC 52 write should succeed");
+        assert_eq!(buffer, b"\x1b]52;c;aGVsbG8=\x07");
     }
 }

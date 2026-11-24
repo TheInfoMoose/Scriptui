@@ -43,6 +43,23 @@ fn is_blocking_modal(overlay: OverlayMode) -> bool {
     )
 }
 
+fn poll_and_read_event<P, R>(poll_fn: P, read_fn: R) -> io::Result<Option<Event>>
+where
+    P: FnOnce() -> io::Result<bool>,
+    R: FnOnce() -> io::Result<Event>,
+{
+    match poll_fn() {
+        Ok(true) => match read_fn() {
+            Ok(ev) => Ok(Some(ev)),
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => Ok(None),
+            Err(err) => Err(err),
+        },
+        Ok(false) => Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::Interrupted => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FrameState {
     pub regions: ScreenRegions,
@@ -274,10 +291,13 @@ impl TuiApp {
                 }
             }
         } else if let KeyCode::Char(c) = key.code {
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            {
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::HYPER
+                    | KeyModifiers::META,
+            ) {
                 let s = c.to_string();
                 self.state.insert_text(&s);
             }
@@ -412,8 +432,10 @@ impl TuiApp {
                 needs_redraw = false;
             }
 
-            if event::poll(Duration::from_millis(50))? {
-                match event::read()? {
+            if let Some(ev) =
+                poll_and_read_event(|| event::poll(Duration::from_millis(50)), event::read)?
+            {
+                match ev {
                     Event::Key(key) => {
                         let mut stdout = io::stdout();
                         if let Err(err) = self.handle_key_event(key, &mut stdout) {
@@ -888,5 +910,58 @@ mod tests {
             clipboard_str.contains("YQ=="),
             "expected OSC 52 buffer to contain base64 'YQ==', got {clipboard_str:?}"
         );
+    }
+
+    #[test]
+    fn super_modifier_key_does_not_insert_text() {
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        let mut clipboard_buf = Vec::new();
+
+        for modifier in [KeyModifiers::SUPER, KeyModifiers::HYPER, KeyModifiers::META] {
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char('s'), modifier),
+                &mut clipboard_buf,
+            )
+            .expect("modified key event should succeed");
+        }
+
+        assert!(app.state.buffers.active().document.text().is_empty());
+    }
+
+    #[test]
+    fn eintr_retry_continues_on_interrupted() {
+        let poll_interrupted = poll_and_read_event(
+            || Err(io::Error::new(io::ErrorKind::Interrupted, "signal")),
+            || unreachable!("read_fn should not be called when poll fails"),
+        )
+        .expect("Interrupted on poll should return Ok(None)");
+        assert!(poll_interrupted.is_none());
+
+        let read_interrupted = poll_and_read_event(
+            || Ok(true),
+            || Err(io::Error::new(io::ErrorKind::Interrupted, "signal")),
+        )
+        .expect("Interrupted on read should return Ok(None)");
+        assert!(read_interrupted.is_none());
+
+        let poll_broken_pipe = poll_and_read_event(
+            || Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe")),
+            || unreachable!("read_fn should not be called when poll fails"),
+        )
+        .expect_err("BrokenPipe on poll should propagate");
+        assert_eq!(poll_broken_pipe.kind(), io::ErrorKind::BrokenPipe);
+
+        let read_broken_pipe = poll_and_read_event(
+            || Ok(true),
+            || Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe")),
+        )
+        .expect_err("BrokenPipe on read should propagate");
+        assert_eq!(read_broken_pipe.kind(), io::ErrorKind::BrokenPipe);
     }
 }
