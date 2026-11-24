@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 14):** Fix Phase 13 review follow-ups (`BUG-0037`, `BUG-0038`, `BUG-0039`, `BUG-0040`, `TASK-0076`) and add the full-suite GitHub Actions CI workflow (`.github/workflows/ci.yml`; release workflow deferred to next phase).
+**Phase goal (Phase 15):** Fix Phase 14 review defects (`BUG-0041`, `BUG-0042`) and add the tag-triggered + `workflow_dispatch` dry-run GitHub Actions release workflow (`.github/workflows/release.yml`, resolving OQ-2).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,10 +28,9 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 14A** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/modals.rs`, `crates/scriptui-tui/src/palette.rs` | — |
-| 2 | **STEP 14B** | `/goal` | core | `crates/scriptui-core/src/buffer.rs` | — |
-| 3 | **STEP 14C** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | STEP 14B |
-| 4 | **STEP 14D** | `/goal` | ci | `.github/workflows/ci.yml` | — |
+| 1 | **STEP 15A** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs` | — |
+| 2 | **STEP 15B** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | — |
+| 3 | **STEP 15C** | `/goal` | ci | `.github/workflows/release.yml` | — |
 
 ### Completed
 
@@ -96,6 +95,10 @@
 | **STEP 13C** | Done (`82f06dc`) | `/goal` | core | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/buffer.rs` |
 | **STEP 13D** | Done (`9bc15ff`) | `/goal` | core | `crates/scriptui-core/src/selection.rs`, `crates/scriptui-core/src/editor.rs` |
 | **STEP 13E** | Done (`489e5f2`) | `/goal` | preview | `crates/scriptui-core/src/preview.rs`, `crates/scriptui-tui/src/app.rs` |
+| **STEP 14A** | Done (`be6c288`) | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/modals.rs`, `crates/scriptui-tui/src/palette.rs` |
+| **STEP 14B** | Done (`aed0790`) | `/goal` | core | `crates/scriptui-core/src/buffer.rs` |
+| **STEP 14C** | Done (`206333d`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
+| **STEP 14D** | Done (`5167e8d`) | `/goal` | ci | `.github/workflows/ci.yml` |
 
 ### Future phases
 
@@ -140,7 +143,7 @@
 ### Open Questions
 
 - **OQ-1 (Phase 14 — resolved):** PyYAML (`python3 -c 'import yaml'`) is confirmed installed on the host and used for YAML syntax validation in STEP 14D's `POST_GATE`.
-- **OQ-2 (Phase 13):** How to exercise `release.yml` before the real tag: push a prerelease tag (`v0.1.0-rc.1`) and delete the release afterward, or add a `workflow_dispatch` trigger that builds without publishing. Waits on: user.
+- **OQ-2 (Phase 15 — resolved):** `.github/workflows/release.yml` includes a `workflow_dispatch` trigger that runs the full build and packaging matrix and uploads workflow artifacts without creating a GitHub Release; `publish` runs only on `refs/tags/v*`.
 - **OQ-3 (Phase 10 — resolved):** `[USER]` real-terminal checklist targets Linux desktop terminals (e.g., GNOME Terminal / Alacritty / Kitty / WezTerm); checklist lives in `docs/functional-verification-matrix.md`.
 
 ### Parked
@@ -1625,6 +1628,177 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && python3 -c 'import yaml; d = yaml.safe_load(open(".github/workflows/ci.yml")); assert d["name"] == "CI" and "check" in d["jobs"] and "macos-test" in d["jobs"]' && grep -qE 'cargo fmt --all -- --check' .github/workflows/ci.yml && grep -qE 'cargo clippy --workspace --all-targets -- -D warnings' .github/workflows/ci.yml && grep -qE 'cargo test --workspace' .github/workflows/ci.yml && grep -qE 'cargo-deny-action' .github/workflows/ci.yml && grep -qE 'cargo build --release --locked' .github/workflows/ci.yml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+### STEP 15A: Restrict Find/Replace Bar Passthrough to Non-Editing Global Shortcuts
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0041`
+
+```text
+[STEP_ID]
+STEP 15A: Trap document-editing, history, selection, multi-cursor, spell-quick-fix, and unbound chords in `handle_find_bar_key` while continuing to pass through non-editing global shortcuts.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/find_bar.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/app.rs:260-380 (TuiApp::handle_key_event overlay dispatch and keymap fallback)
+  - crates/scriptui-tui/src/terminal.rs:175-210 (crossterm_key_to_chord)
+  - crates/scriptui-core/src/keymap.rs:99-365 (Action enum and Keymap::default_cua)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify TuiApp::handle_key_event or Keymap::default_cua.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pressing document-editing or selection shortcuts (`Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`, `Ctrl+X`, `Ctrl+C`, `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+L`, `Ctrl+.`) or unbound chords while `OverlayMode::Find` or `OverlayMode::Replace` is open never mutates the underlying document, selection, clipboard, or overlay, while non-editing global shortcuts still pass through to `TuiApp`.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/find_bar.rs` (`handle_find_bar_key`):
+     - Preserve direct handling of Find/Replace bar controls: `Esc`, `Tab`/`BackTab`, `Enter` variants (`Alt+Enter`, `Ctrl+Enter`, `Shift+Enter`, plain `Enter`), `Alt+C`/`Alt+W`/`Alt+R` toggles (without `CONTROL|SUPER|HYPER|META`), `Backspace`, printable characters without `CONTROL|ALT|SUPER|HYPER|META`, and plain navigation/delete keys.
+     - For any other key (including `Alt+<char>` other than `c`/`w`/`r` and the fallback arm), look up `crate::terminal::crossterm_key_to_chord(key).and_then(|c| state.keymap.lookup(c))`.
+     - Return `Ok(false)` (pass through to `TuiApp`) ONLY when the resolved `Action` is a non-editing global/window/view/buffer/search action:
+       `Action::Save`, `Action::SaveAs`, `Action::OpenFile`, `Action::NewBuffer`, `Action::CloseBuffer`, `Action::NextBuffer`, `Action::PrevBuffer`, `Action::Quit`, `Action::OpenFind`, `Action::OpenReplace`, `Action::FindNext`, `Action::FindPrev`, `Action::OpenCommandPalette`, `Action::TogglePreview`, `Action::ExpandPreview`, `Action::ToggleSoftWrap`, `Action::ToggleLineNumbers`.
+     - Return `Ok(true)` (consume/trap) for all other keys: document-editing/history/selection/navigation/multi-cursor/spell actions (`Undo`, `Redo`, `Cut`, `Copy`, `Paste`, `SelectAll`, `SelectAllOccurrences`, `OpenSpellQuickFix`, `Select*`, `Move*`, `Page*`, `InsertNewline`, `Backspace`, `Delete`, `Indent`, `Dedent`, `Escape`), `SUPER`/`HYPER`/`META` chords, and any unbound chord.
+
+Must still work:
+  - Find/Replace query and replacement typing, `Backspace`, `Tab`/`BackTab`, `Esc`, `Enter` variants, and `Alt+C`/`Alt+W`/`Alt+R`.
+  - Existing tests `find_bar_consumes_navigation_and_delete_keys` and `find_bar_passes_through_global_shortcuts_and_resets_on_ctrl_pagedown` (all non-editing global shortcuts still return `Ok(false)` and trigger their `TuiApp` actions).
+
+Drops: none
+
+Tests:
+  - `find_bar_traps_document_editing_shortcuts_end_to_end`: Create a `TuiApp`, insert `"alpha beta"` then `" gamma"` (so undo history is non-empty), select text or position the caret, open `OverlayMode::Find` (`Ctrl+F`), and dispatch `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`, `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Shift+L`, `Ctrl+.`, and unbound `Alt+X` through both `handle_find_bar_key` (asserting `Ok(true)`) and `TuiApp::handle_key_event` (asserting document text, selection, OSC 52 clipboard output buffer, and `OverlayMode::Find` are unchanged); repeat with `OverlayMode::Replace` (`Ctrl+H`) active.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn find_bar_traps_document_editing_shortcuts_end_to_end' crates/scriptui-tui/src/find_bar.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 15B: Prevent Overlapping Edits in Multi-Cursor `handle_insert_newline`
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0042`
+
+```text
+[STEP_ID]
+STEP 15B: Guard `EditorState::handle_insert_newline` so `ClearCurrentLine` never overlaps another selection or non-empty selection and `planned_edits` are validated disjoint before any buffer mutation.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/editor.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/indent.rs:1-80 (EnterOutcome, compute_enter_indent)
+  - crates/scriptui-core/src/selection.rs:1-140 (Selection, SelectionSet::from_ranges_with_primary)
+  - crates/scriptui-core/src/buffer.rs:160-240 (apply_raw_edit)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change EnterOutcome or compute_enter_indent semantics.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Multi-cursor `Action::InsertNewline` never returns partial unrecorded `OutOfBounds` errors or corrupts surrounding text when a selection starts, ends, or spans inside a line whose `compute_enter_indent` returns `EnterOutcome::ClearCurrentLine`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/editor.rs` (`EditorState::handle_insert_newline`):
+     - When `compute_enter_indent` returns `EnterOutcome::ClearCurrentLine` for a cursor on `line` (`[line_start, line_end)`), emit a `ClearCurrentLine` edit `(line_start, line_end, "")` ONLY when:
+       (a) that cursor's selection is empty (`sel.is_empty()`), AND
+       (b) no other selection in `selection_before.ranges()` overlaps `[line_start, line_end)` (strictly: `other_start < line_end && other_end > line_start`).
+     - Otherwise (when the cursor itself is a non-empty selection, or another selection overlaps `[line_start, line_end)`), fall back to inserting `"\n"` at `(sel_start, sel_end)` for that cursor so all planned edits remain strictly disjoint.
+     - After sorting `planned_edits` by `(start, end)` and BEFORE calling `active.document.apply_raw_edit`, verify every edit satisfies `start <= end && end <= len_chars` and consecutive edits satisfy `prev.end <= next.start`; if violated, return `Err(ScriptuiError::OutOfBounds { .. })` without mutating `active.document`.
+     - Preserve caret-offset shifting, `SelectionSet::from_ranges_with_primary(..., selection_before.primary_index())`, and single atomic `EditTransaction` undo/redo recording.
+
+Must still work:
+  - Single-cursor and multi-cursor `Action::InsertNewline` on regular lines, indented/bullet/quote continuation lines, multiple point cursors on the same empty bullet line, and non-overlapping mixed `ClearCurrentLine` + `Insert` cursors (including `insert_newline_multicursor_clears_empty_bullet_and_inserts_on_other_line`).
+  - `Action::Undo` and `Action::Redo` restore exact document text and `SelectionSet` (including `primary_index`).
+
+Drops: none
+
+Tests:
+  - `insert_newline_multicursor_overlapping_clear_line_and_selection_is_atomic`:
+    - Case A: `"hello\n- "` with `[Selection::new(7, 2), Selection::point(8)]` (`primary_index = 0`) -> `dispatch(Action::InsertNewline)` returns `Ok(())`, buffer becomes `"he\n \n"`, and `dispatch(Action::Undo)` restores `"hello\n- "` with `[Selection::new(7, 2), Selection::point(8)]`.
+    - Case B: `"- \nhello"` with `[Selection::point(0), Selection::new(1, 5)]` (`primary_index = 0`) -> `dispatch(Action::InsertNewline)` returns `Ok(())`, buffer becomes `"\n-\nllo"` with point selections at `1` and `3`, and `dispatch(Action::Undo)` restores `"- \nhello"` with `[Selection::point(0), Selection::new(1, 5)]`.
+    - Case C: `"hello\n- "` with single non-empty selection `[Selection::new(2, 8)]` -> `dispatch(Action::InsertNewline)` returns `Ok(())`, buffer becomes `"he\n"`, and `dispatch(Action::Undo)` restores `"hello\n- "`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn insert_newline_multicursor_overlapping_clear_line_and_selection_is_atomic' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 15C: Tag-Triggered and Dry-Run GitHub Actions Release Workflow (`.github/workflows/release.yml`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 15C: Add `.github/workflows/release.yml` building Linux x86_64 and macOS arm64 tarballs with SHA256 checksums on `v*.*.*` tags (publishing GitHub Release) and on `workflow_dispatch` (dry-run artifact upload without publishing).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - .github/workflows/release.yml (NEW)
+READ_ONLY_REFS:
+  - .github/workflows/ci.yml:1-41 (existing GitHub Actions conventions and action versions)
+  - Cargo.toml:1-20 (workspace metadata and release profile)
+  - crates/scriptui-tui/Cargo.toml:1-27 (binary name `scriptui`)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not modify `.github/workflows/ci.yml`, `CHANGELOG.md`, or `Cargo.toml`. Do not hardcode secrets, tokens, or personal paths.
+
+[PRE_GATE]
+test -f .github/workflows/ci.yml && test -f THIRD_PARTY_LICENSES.md && test -f LICENSE
+
+[MUTATION_SPEC]
+Goal: Pushing a `v*.*.*` tag builds and packages `scriptui` release tarballs and `.sha256` files for `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin` and publishes them to a GitHub Release, while triggering `workflow_dispatch` runs the full build and packaging matrix and uploads workflow artifacts without creating a GitHub Release.
+
+Contract & Behavior:
+  1. `.github/workflows/release.yml` (new):
+     - `name: Release`
+     - Triggers:
+       - `push` with `tags: ["v*.*.*"]`
+       - `workflow_dispatch:` (no required inputs)
+     - Top-level `permissions:` with `contents: read` only.
+     - Job `build`:
+       - `strategy.fail-fast: false`
+       - `strategy.matrix.include` with exactly two entries:
+         - `os: ubuntu-latest`, `target: x86_64-unknown-linux-gnu`
+         - `os: macos-14`, `target: aarch64-apple-darwin`
+       - `runs-on: ${{ matrix.os }}`
+       - Steps:
+         - `actions/checkout@v4`
+         - `dtolnay/rust-toolchain@stable` with `targets: ${{ matrix.target }}`
+         - `Swatinem/rust-cache@v2`
+         - Build locked release binary: `cargo build --release --locked --target ${{ matrix.target }}`
+         - Package `scriptui-${VERSION}-${{ matrix.target }}.tar.gz` (using `${GITHUB_REF_NAME}` on tag push and `dry-run-${GITHUB_SHA::7}` on `workflow_dispatch`) containing the `scriptui` binary (`target/${{ matrix.target }}/release/scriptui`), `README.md`, `LICENSE`, and `THIRD_PARTY_LICENSES.md`, and generate `scriptui-${VERSION}-${{ matrix.target }}.tar.gz.sha256` (supporting both `sha256sum` on Linux and `shasum -a 256` on macOS).
+         - Upload the `.tar.gz` and `.tar.gz.sha256` files via `actions/upload-artifact@v4`.
+     - Job `publish`:
+       - `needs: [build]`
+       - `if: startsWith(github.ref, 'refs/tags/v')`
+       - `runs-on: ubuntu-latest`
+       - `permissions:` with `contents: write`
+       - Steps:
+         - Download all built artifacts via `actions/download-artifact@v4` (with `merge-multiple: true` into a staging directory such as `dist`).
+         - Publish the GitHub Release via `softprops/action-gh-release@v2` attaching `dist/*.tar.gz` and `dist/*.tar.gz.sha256` with `generate_release_notes: true`.
+
+Must still work:
+  - `.github/workflows/ci.yml` unchanged; local workspace build, clippy, formatting, and all unit/integration tests unchanged.
+
+Drops: none
+
+Tests:
+  - None in Rust (workflow YAML step). `POST_GATE` parses `.github/workflows/release.yml` with PyYAML and asserts `name == "Release"`, triggers (`push.tags` contains `v*.*.*` and `workflow_dispatch` present), exact two-target `build` matrix (`x86_64-unknown-linux-gnu` on `ubuntu-latest`, `aarch64-apple-darwin` on `macos-14`), `publish` job tag-only `if` condition (`refs/tags/v`) and `contents: write` permission, and required build/release steps.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && python3 -c 'import yaml; d = yaml.safe_load(open(".github/workflows/release.yml")); on = d.get("on", d.get(True)); assert d["name"] == "Release" and "workflow_dispatch" in on and "v*.*.*" in on["push"]["tags"]; targets = {m["target"]: m["os"] for m in d["jobs"]["build"]["strategy"]["matrix"]["include"]}; assert targets == {"x86_64-unknown-linux-gnu": "ubuntu-latest", "aarch64-apple-darwin": "macos-14"}; pub = d["jobs"]["publish"]; assert "refs/tags/v" in pub["if"] and pub["permissions"]["contents"] == "write"' && grep -qE 'cargo build --release --locked --target' .github/workflows/release.yml && grep -qE 'action-gh-release' .github/workflows/release.yml
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
