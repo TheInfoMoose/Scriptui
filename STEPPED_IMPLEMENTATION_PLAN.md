@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 12):** Resolve all Critical and High audit blockers plus deferred `STEP 11A` (`BUG-0017`–`BUG-0025`, `TASK-0060`–`TASK-0062`): enforce `deny.toml` + third-party license notices + workspace metadata, fix the UTF-8 task-list panic and atomic `O_EXCL` file I/O, track undo clean-point `dirty` state, wire internal `Ctrl+V` clipboard, wire startup config/locale/custom-theme/new-file/key-repeat handling, cache `SyntaxSet` and `PreviewDocument`, and add Unix signal handling with proper alt-screen exit error ordering.
+**Phase goal (Phase 13):** Fix pre-release bugs and hardening gaps (`BUG-0026`, `BUG-0027`, `BUG-0028`, `BUG-0029`, `BUG-0032` core+OSC52, `BUG-0034`, `BUG-0035`, `BUG-0036`): `EINTR` retry + `Super`/`Meta` modifier filtering + OSC 52 payload cap, Find/Replace key capture & state reset, symlink containment + `O_EXCL`/rollback + max file size + empty insert undo guard, multi-cursor preservation & `SelectionSet::normalize` primary remapping, and `PreviewMode::Expanded` scroll sync + `unicode_width` table/preview layout.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,12 +28,11 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 12A** | `/goal` | tooling | `deny.toml`, `THIRD_PARTY_LICENSES.md`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml` | — |
-| 2 | **STEP 12B** | `/goal` | core | `crates/scriptui-core/src/indent.rs`, `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/spell.rs` | — |
-| 3 | **STEP 12C** | `/goal` | core | `crates/scriptui-core/src/history.rs`, `crates/scriptui-core/src/editor.rs`, `crates/scriptui-tui/src/modals.rs` | — |
-| 4 | **STEP 12D** | `/goal` | tui | `crates/scriptui-core/src/buffers.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/palette.rs` | STEP 12B, STEP 12C |
-| 5 | **STEP 12E** | `/goal` | perf | `crates/scriptui-core/src/highlight.rs`, `crates/scriptui-tui/src/preview_pane.rs` | — |
-| 6 | **STEP 12F** | `/goal` | tui | `crates/scriptui-tui/Cargo.toml`, `Cargo.lock`, `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/main.rs` | STEP 12A, STEP 12D |
+| 1 | **STEP 13A** | `/goal` | tui | `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs` | — |
+| 2 | **STEP 13B** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/app.rs` | STEP 13A |
+| 3 | **STEP 13C** | `/goal` | core | `crates/scriptui-core/src/theme.rs`, `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/buffer.rs` | — |
+| 4 | **STEP 13D** | `/goal` | core | `crates/scriptui-core/src/selection.rs`, `crates/scriptui-core/src/editor.rs` | STEP 13C |
+| 5 | **STEP 13E** | `/goal` | preview | `crates/scriptui-core/src/preview.rs`, `crates/scriptui-tui/src/app.rs` | STEP 13B |
 
 ### Completed
 
@@ -87,6 +86,12 @@
 | **STEP 10B** | Done (`ec1a9ee`) | `/goal` | tui | `crates/scriptui-tui/tests/tui_integration.rs` |
 | **STEP 10C** | Done (`26bed7f`) | `/goal` | cli | `crates/scriptui-tui/tests/tui_integration.rs` |
 | **[USER] 11B** | Done (`25892eb`) | `/teamwork` | audit | `docs/codebase-audit-report.md` |
+| **STEP 12A** | Done (`daa9fac`) | `/goal` | tooling | `deny.toml`, `THIRD_PARTY_LICENSES.md`, `Cargo.toml`, `crates/scriptui-core/Cargo.toml`, `crates/scriptui-tui/Cargo.toml` |
+| **STEP 12B** | Done (`eff070c`) | `/goal` | core | `crates/scriptui-core/src/indent.rs`, `crates/scriptui-core/src/buffer.rs`, `crates/scriptui-core/src/spell.rs` |
+| **STEP 12C** | Done (`b0addbd`) | `/goal` | core | `crates/scriptui-core/src/history.rs`, `crates/scriptui-core/src/editor.rs`, `crates/scriptui-tui/src/modals.rs` |
+| **STEP 12D** | Done (`a01c7eb`) | `/goal` | tui | `crates/scriptui-core/src/buffers.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/palette.rs` |
+| **STEP 12E** | Done (`f5febeb`) | `/goal` | perf | `crates/scriptui-core/src/highlight.rs`, `crates/scriptui-tui/src/preview_pane.rs` |
+| **STEP 12F** | Done (`213e951`) | `/goal` | tui | `crates/scriptui-tui/Cargo.toml`, `Cargo.lock`, `crates/scriptui-tui/src/terminal.rs`, `crates/scriptui-tui/src/app.rs`, `crates/scriptui-tui/src/main.rs` |
 
 ### Future phases
 
@@ -1127,6 +1132,275 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo deny check && grep -qE 'signal-hook' crates/scriptui-tui/Cargo.toml && grep -qE 'pub fn should_terminate' crates/scriptui-tui/src/terminal.rs && grep -qE 'pub fn handle_suspend_if_requested' crates/scriptui-tui/src/terminal.rs && grep -qE 'should_terminate\(\)' crates/scriptui-tui/src/app.rs && grep -qE 'fn signal_flags_report_terminate_and_consume_suspend_once' crates/scriptui-tui/src/terminal.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 13 Step Blocks
+
+### STEP 13A: TUI Input Modifier Filtering, OSC 52 Cap & `EINTR` Event Loop Retry
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0028`, `BUG-0035`, `BUG-0032` (OSC 52 cap)
+
+```text
+[STEP_ID]
+STEP 13A: Ignore Super/Hyper/Meta modifiers in key chord mapping and char insertion, cap OSC 52 clipboard output at MAX_OSC52_BYTES, and retry crossterm event::poll/event::read on ErrorKind::Interrupted (EINTR).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/terminal.rs
+  - crates/scriptui-tui/src/app.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/keymap.rs:1-80 (KeyChord, KeyModifiers)
+  - crates/scriptui-tui/src/terminal.rs:177-247 (crossterm_key_to_chord, write_osc52_clipboard)
+  - crates/scriptui-tui/src/app.rs:237-286,399-445 (handle_key_event, run_event_loop)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not alter internal EditorState clipboard behavior for Action::Copy/Action::Cut.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pressing Super/Hyper/Meta shortcuts (e.g. Super+s or Super+Left) neither inserts characters nor triggers editor navigation, oversized copies do not emit unbounded OSC 52 terminal sequences, and Unix signal interruption (EINTR) in event::poll/event::read retries the event loop instead of exiting with an error.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/terminal.rs`:
+     - In `crossterm_key_to_chord(event: KeyEvent) -> Option<KeyChord>`, return `None` whenever `event.modifiers.intersects(CrosstermKeyModifiers::SUPER | CrosstermKeyModifiers::HYPER | CrosstermKeyModifiers::META)`.
+     - Define `pub const MAX_OSC52_BYTES: usize = 74_994;` (100 KiB base64-encoded limit). In `write_osc52_clipboard<W: Write>(writer: &mut W, text: &str) -> io::Result<()>`, if `text.len() > MAX_OSC52_BYTES`, return `Ok(())` without writing an OSC 52 escape sequence.
+  2. `crates/scriptui-tui/src/app.rs`:
+     - In `TuiApp::handle_key_event`, in the `KeyCode::Char(c)` fallback branch, require `!key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)` before inserting text.
+     - In `TuiApp::run_event_loop` (and via a testable helper `poll_and_read_event` or equivalent taking poll/read closures), treat `Err(err)` where `err.kind() == io::ErrorKind::Interrupted` from either `event::poll` or `event::read` as `Ok(None)` so the loop continues and checks `guard.should_terminate()` / `guard.handle_suspend_if_requested()`. Non-`Interrupted` errors still propagate.
+
+Must still work:
+  - Normal `Ctrl`, `Alt`, `Shift`, and unmodified keybindings and text input.
+  - Normal-sized OSC 52 copy/cut sequences (`<= MAX_OSC52_BYTES`) and internal `EditorState` clipboard for all sizes.
+
+Drops: none
+
+Tests:
+  - `crossterm_key_to_chord_ignores_super_hyper_meta`: `KeyEvent` with `SUPER`, `HYPER`, or `META` on `Char('s')` and `Left` -> `crossterm_key_to_chord` returns `None`.
+  - `write_osc52_clipboard_skips_oversized_payload`: writing `MAX_OSC52_BYTES + 1` bytes of `'a'` -> `Ok(())` and output buffer remains empty, while `"hello"` still writes `\x1b]52;c;aGVsbG8=\x07`.
+  - `super_modifier_key_does_not_insert_text`: `TuiApp::handle_key_event` with `Char('s')` + `KeyModifiers::SUPER` -> buffer text remains empty.
+  - `eintr_retry_continues_on_interrupted`: helper returns `Ok(None)` when poll or read returns `ErrorKind::Interrupted`, and propagates `ErrorKind::BrokenPipe`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'MAX_OSC52_BYTES' crates/scriptui-tui/src/terminal.rs && grep -qE 'fn crossterm_key_to_chord_ignores_super_hyper_meta' crates/scriptui-tui/src/terminal.rs && grep -qE 'fn write_osc52_clipboard_skips_oversized_payload' crates/scriptui-tui/src/terminal.rs && grep -qE 'ErrorKind::Interrupted' crates/scriptui-tui/src/app.rs && grep -qE 'fn eintr_retry_continues_on_interrupted' crates/scriptui-tui/src/app.rs && grep -qE 'fn super_modifier_key_does_not_insert_text' crates/scriptui-tui/src/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13B: Find/Replace Key Capture & Focus/Match State Reset
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0026`
+
+```text
+[STEP_ID]
+STEP 13B: Prevent unhandled navigation/Delete keys in Find/Replace from leaking to the editor, reset FindFocus::Query on open/close, and clear stale find matches across buffer switches.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/find_bar.rs
+  - crates/scriptui-tui/src/app.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/find_bar.rs:108-210 (handle_find_bar_key)
+  - crates/scriptui-tui/src/app.rs:190-287,289-340 (handle_key_event, handle_mouse_event)
+  - crates/scriptui-core/src/editor.rs:480-560 (Action dispatch for OpenFind/OpenReplace/buffer switching)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do not break F3/Shift+F3 navigation after closing Find/Replace with Esc.
+
+[PRE_GATE]
+grep -qE 'fn super_modifier_key_does_not_insert_text' crates/scriptui-tui/src/app.rs
+
+[MUTATION_SPEC]
+Goal: When the Find/Replace bar is open, Delete and cursor/page navigation keys (Left, Right, Up, Down, Home, End, PageUp, PageDown) never mutate or move the underlying editor; reopening Find/Replace starts with FindFocus::Query; and switching/closing/opening buffers clears stale find_replace.matches and active_match.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/find_bar.rs`:
+     - In `handle_find_bar_key`, consume (`Ok(true)`) `KeyCode::Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`, `PageUp`, `PageDown` (and any non-hotkey unmodified/Shift character or Backspace) without mutating the editor.
+     - Only allow explicit global/find-mode shortcuts (`Ctrl+F`, `Ctrl+H`, `F3`, `Shift+F3`, `Ctrl+Q`, `Ctrl+S`) to return `Ok(false)` so `app.rs` can handle them; all other unhandled keys while Find/Replace is open must not fall through to editor text insertion or cursor movement.
+  2. `crates/scriptui-tui/src/app.rs`:
+     - When `OverlayMode::Find` or `OverlayMode::Replace` is entered (via keybinding or palette) or exited, reset `self.find_bar.focus = FindFocus::Query`.
+     - Whenever switching, closing, or opening a buffer (`NextBuffer`, `PrevBuffer`, `CloseBuffer`, `NewBuffer`, mouse tab click, or `OpenFilePrompt` completion), clear `self.state.find_replace.matches` and set `self.state.find_replace.active_match = None` (and reset `self.find_bar.focus = FindFocus::Query` if an overlay was open).
+
+Must still work:
+  - `Esc` closes Find/Replace, `Tab`/`BackTab` toggles focus in Replace mode, `Alt+C`/`Alt+W`/`Alt+R` toggle find options, `Enter`/`Shift+Enter`/`Ctrl+Enter`/`Alt+Enter` work as before.
+  - `F3` / `Shift+F3` after closing Find/Replace still jumps to matches for the current buffer.
+
+Drops: none
+
+Tests:
+  - `find_bar_consumes_navigation_and_delete_keys`: `handle_find_bar_key` with `OverlayMode::Find` and `Delete`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown` -> returns `Ok(true)` and leaves editor text/cursor untouched when dispatched through `TuiApp::handle_key_event`.
+  - `find_bar_focus_and_matches_reset_across_buffer_switch`: focus `FindFocus::Replacement` in Replace mode with active matches on buffer 0, switch to buffer 1 via `Ctrl+Tab` (or `NextBuffer`), and reopen Replace -> `find_replace.matches` is empty, `active_match` is `None`, and `find_bar.focus` is `FindFocus::Query`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn find_bar_consumes_navigation_and_delete_keys' crates/scriptui-tui/src/find_bar.rs && grep -qE 'fn find_bar_focus_and_matches_reset_across_buffer_switch' crates/scriptui-tui/src/app.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13C: Core Symlink Containment, Locale Rename Rollback, Max File Size & Empty Insert Guard
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0032` (core), `BUG-0034`, `BUG-0036`
+
+```text
+[STEP_ID]
+STEP 13C: Enforce canonical directory containment on theme and locale loads, roll back dic_dest if aff_dest rename fails in import_locale_files, cap DocumentBuffer::from_file at MAX_FILE_BYTES, and avoid pushing no-op BufferEdits on empty point-selection inserts.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/theme.rs
+  - crates/scriptui-core/src/spell.rs
+  - crates/scriptui-core/src/buffer.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/theme.rs:306-331 (resolve_theme)
+  - crates/scriptui-core/src/spell.rs:205-247,405-470 (load_locale, import_locale_files)
+  - crates/scriptui-core/src/buffer.rs:116-135,290-338 (from_file, apply_insert)
+  - crates/scriptui-core/src/editor.rs:370-388 (insert_text calling UndoStack::record)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Symlinks escaping theme or dictionary search directories are rejected, failed `.aff` rename in `import_locale_files` leaves no partial `.dic` on disk, files larger than `MAX_FILE_BYTES` fail cleanly before reading into memory, and `apply_insert("")` on a point selection emits no `BufferEdit` so `UndoStack::is_at_saved_state()` stays accurate.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/theme.rs`:
+     - In `resolve_theme(name: &str, search_dirs: &[PathBuf])`, canonicalize each existing `dir` and `candidate` path; only load `candidate` if `canonical_candidate.starts_with(&canonical_dir)` (rejecting/skipping symlinks that escape `dir`).
+  2. `crates/scriptui-core/src/spell.rs`:
+     - In `SpellEngine::load_locale(locale: &str, search_dirs: &[PathBuf])`, canonicalize each `dir`, `aff_path`, and `dic_path`; only load if both canonical paths start with `canonical_dir`.
+     - In `import_locale_files`, before overwriting `dic_dest`, record whether `dic_dest` already existed (and its prior bytes if so). If `fs::rename(&aff_tmp, &aff_dest)` fails, remove `aff_tmp` and restore `dic_dest` (write back prior bytes if it existed, or remove `dic_dest` if it did not) before returning `Err`.
+  3. `crates/scriptui-core/src/buffer.rs`:
+     - Define `pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;` (64 MiB). In `DocumentBuffer::from_file(path: &Path)`, check `fs::metadata(path)?.len() > MAX_FILE_BYTES` before `fs::read_to_string`, returning `ScriptuiError::Io` with `io::ErrorKind::InvalidData`.
+     - In `DocumentBuffer::apply_insert(&mut self, text: &str)`, skip pushing a `BufferEdit` when `text.is_empty() && start == end`, so `apply_insert("")` on point selections returns an empty `Vec`.
+
+Must still work:
+  - Valid custom themes and locales inside their respective directories load normally.
+  - Non-empty inserts and empty inserts replacing a non-empty selection (`start < end`) still record `BufferEdit` and mark `dirty = true`.
+
+Drops: none
+
+Tests:
+  - `resolve_theme_rejects_symlink_escape` (in `theme.rs`, `#[cfg(unix)]`): symlink inside theme dir pointing outside -> `resolve_theme` does not load the outside file.
+  - `load_locale_rejects_symlink_escape` (in `spell.rs`, `#[cfg(unix)]`): symlinked `.dic`/`.aff` pointing outside dict dir -> `load_locale` returns `Err`.
+  - `import_locale_files_rolls_back_dic_on_aff_rename_failure` (in `spell.rs`): simulate failure on second rename (e.g. `aff_dest` is a non-empty directory) -> `import_locale_files` returns `Err` and `dic_dest` is absent (or restored to prior content).
+  - `empty_insert_on_point_selection_returns_no_edits` (in `buffer.rs`): `DocumentBuffer::empty()` with `apply_insert("")` -> returns empty `Vec`, `dirty() == false`, `revision() == 0`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'MAX_FILE_BYTES' crates/scriptui-core/src/buffer.rs && grep -qE 'fn resolve_theme_rejects_symlink_escape' crates/scriptui-core/src/theme.rs && grep -qE 'fn load_locale_rejects_symlink_escape' crates/scriptui-core/src/spell.rs && grep -qE 'fn import_locale_files_rolls_back_dic_on_aff_rename_failure' crates/scriptui-core/src/spell.rs && grep -qE 'fn empty_insert_on_point_selection_returns_no_edits' crates/scriptui-core/src/buffer.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13D: Multi-Cursor Preservation & `SelectionSet::normalize` Primary Remapping
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0029`
+
+```text
+[STEP_ID]
+STEP 13D: Remap SelectionSet::primary across sort/merge in normalize(), and preserve all cursors in handle_indent, move_primary_selection, and ClearCurrentLine.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/selection.rs
+  - crates/scriptui-core/src/editor.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/selection.rs:56-145 (SelectionSet, normalize)
+  - crates/scriptui-core/src/editor.rs:843-990 (handle_insert_newline, handle_indent, move_primary_selection)
+  - crates/scriptui-core/src/indent.rs:1-120 (indent_lines, dedent_lines)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+grep -qE 'fn empty_insert_on_point_selection_returns_no_edits' crates/scriptui-core/src/buffer.rs
+
+[MUTATION_SPEC]
+Goal: Sorting or merging ranges in SelectionSet::normalize() keeps `primary` pointing at the original primary range (or the merged range containing it), and indent/dedent, cursor movement, and ClearCurrentLine preserve multiple cursors instead of collapsing to primary.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/selection.rs`:
+     - In `SelectionSet::normalize(&mut self)`, tag each range with whether it was the `primary` element before sorting; after sorting and merging overlapping/adjacent ranges, set `self.primary` to the index of the merged range that absorbed the tagged primary element (falling back to `0` only if empty).
+  2. `crates/scriptui-core/src/editor.rs`:
+     - In `handle_indent(&mut self, indent: bool)`, collect the unique line ranges covered by all selections in `selection_before.ranges()`, indent/dedent each affected line once (in reverse or merged line-range order so offsets stay consistent), and shift every selection range in `selection_before` rather than collapsing to `primary`.
+     - In `move_primary_selection` (and `Action::Move*` / `Action::Select*`), apply the motion to every selection in `doc.selection()` and rebuild `SelectionSet` preserving `primary` rather than collapsing multi-cursors to a single selection.
+     - In `EnterOutcome::ClearCurrentLine` (inside `handle_insert_newline`), clear the current list-prefix line(s) for all cursors without collapsing multi-cursors (or apply per-cursor line clears in reverse offset order).
+
+Must still work:
+  - Single-cursor indent/dedent, cursor movement, selection extension, and `Enter` list continuation/clear.
+  - `Escape` still collapses multi-cursors to primary when no overlay is open.
+
+Drops: none
+
+Tests:
+  - `normalize_remaps_primary_across_sort_and_merge` (in `selection.rs`): build a `SelectionSet` where `primary` is at a higher offset that sorts earlier or merges with another range -> `set.primary()` returns the range containing that original primary selection.
+  - `multi_cursor_preserved_across_indent_move_and_clear_line` (in `editor.rs`): with 2 cursors on different lines, `Action::Indent`, `Action::MoveRight`, and `Enter` on an empty bullet line (`- `) -> `selection().len() == 2` after each operation and both lines are updated.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn normalize_remaps_primary_across_sort_and_merge' crates/scriptui-core/src/selection.rs && grep -qE 'fn multi_cursor_preserved_across_indent_move_and_clear_line' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 13E: `PreviewMode::Expanded` Scroll Sync & `unicode_width` Table/Preview Layout
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0027`
+
+```text
+[STEP_ID]
+STEP 13E: Measure preview text and table widths with unicode_width, shrink wide tables to fit narrow viewports, and map scroll_line to logical source line in PreviewMode::Expanded.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/preview.rs
+  - crates/scriptui-tui/src/app.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/preview.rs:150-185,480-560,670-715,1050-1170 (table widths, wrapping, borders)
+  - crates/scriptui-core/src/layout.rs:1-120 (WrappedLayout::compute)
+  - crates/scriptui-tui/src/app.rs:116-155 (render_frame, editor_top_source_line)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+
+[PRE_GATE]
+grep -qE 'fn find_bar_focus_and_matches_reset_across_buffer_switch' crates/scriptui-tui/src/app.rs
+
+[MUTATION_SPEC]
+Goal: CJK/emoji/wide characters in Markdown preview align and wrap by terminal display width instead of `chars().count()`, wide tables shrink to fit narrow preview widths, and `PreviewMode::Expanded` syncs preview scroll using the logical source line corresponding to visual `scroll_line`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/preview.rs`:
+     - Replace `.chars().count()` width measurements (table cells, borders, labels, inline wrapping, list markers) with `unicode_width::UnicodeWidthStr::width` (treating `unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)` for per-char wrapping).
+     - When rendering a table whose total column + border width exceeds the target `width`, shrink column widths proportionally (down to a minimum column width of 1) and wrap/truncate cell content to fit within `width`.
+  2. `crates/scriptui-tui/src/app.rs`:
+     - In `TuiApp::render_frame`, when `regions.editor` is `None` (i.e. `PreviewMode::Expanded`) and `regions.preview` is `Some(preview_rect)`, compute `editor_top_source_line` by mapping the active buffer's `scroll_line` through `WrappedLayout::compute` (using the last editor width or `preview_rect.width.max(1)` as fallback) instead of passing visual `scroll_line` directly as logical line.
+
+Must still work:
+  - ASCII Markdown tables, headings, lists, blockquotes, and code blocks render identically at standard widths.
+  - `PreviewMode::Split` scroll sync continues to use the rendered `wrapped_layout`.
+
+Drops: none
+
+Tests:
+  - `wide_table_shrinks_and_measures_display_width` (in `preview.rs`): render a table with wide CJK text (`"日本語テスト"`) and long column text at `width = 24` -> every rendered line's `UnicodeWidthStr::width` is `<= 24`.
+  - `expanded_preview_scroll_sync_maps_visual_scroll_to_logical_line` (in `app.rs`): buffer with a long wrapped paragraph on line 0 followed by a heading on line 1, `scroll_line > 0` within the wrapped paragraph, and `PreviewMode::Expanded` -> `render_frame` maps `editor_top_source_line` to `0` (not `scroll_line`).
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'UnicodeWidthStr' crates/scriptui-core/src/preview.rs && grep -qE 'fn wide_table_shrinks_and_measures_display_width' crates/scriptui-core/src/preview.rs && grep -qE 'fn expanded_preview_scroll_sync_maps_visual_scroll_to_logical_line' crates/scriptui-tui/src/app.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
