@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0065"
 type = "task"
 title = "tooling"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:40:46Z"
-updated_at = "2026-11-24T04:40:46Z"
+updated_at = "2026-11-24T04:56:55Z"
 source_ref = "STEP 12A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0065@2026-11-24T04:54:58Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "daa9fac"
+summary = "STEP 12A: `deny.toml`, Workspace Release Metadata & Third-Party License Notice (`TASK-0060`, `TASK-0061`, `TASK-0062`) (phased check PASS)"
