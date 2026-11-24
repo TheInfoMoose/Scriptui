@@ -183,7 +183,7 @@ pub fn handle_find_bar_key(
                     refresh_find_matches(state)?;
                     Ok(true)
                 }
-                _ => Ok(false),
+                _ => Ok(!should_pass_through(key, state)),
             }
         }
         KeyCode::Backspace => {
@@ -235,8 +235,37 @@ pub fn handle_find_bar_key(
             }
             Ok(true)
         }
-        _ => Ok(false),
+        _ => Ok(!should_pass_through(key, state)),
     }
+}
+
+fn is_find_bar_passthrough_action(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Save
+            | Action::SaveAs
+            | Action::OpenFile
+            | Action::NewBuffer
+            | Action::CloseBuffer
+            | Action::NextBuffer
+            | Action::PrevBuffer
+            | Action::Quit
+            | Action::OpenFind
+            | Action::OpenReplace
+            | Action::FindNext
+            | Action::FindPrev
+            | Action::OpenCommandPalette
+            | Action::TogglePreview
+            | Action::ExpandPreview
+            | Action::ToggleSoftWrap
+            | Action::ToggleLineNumbers
+    )
+}
+
+fn should_pass_through(key: KeyEvent, state: &EditorState) -> bool {
+    crate::terminal::crossterm_key_to_chord(key)
+        .and_then(|chord| state.keymap.lookup(chord))
+        .is_some_and(is_find_bar_passthrough_action)
 }
 
 fn refresh_find_matches(state: &mut EditorState) -> ScriptuiResult<()> {
@@ -473,5 +502,107 @@ mod tests {
         assert!(app.state.find_replace.matches.is_empty());
         assert!(app.state.find_replace.active_match.is_none());
         assert_eq!(app.find_bar.focus, FindFocus::Query);
+    }
+
+    #[test]
+    fn find_bar_traps_document_editing_shortcuts_end_to_end() {
+        use crate::app::TuiApp;
+        use crate::cli::Cli;
+
+        let trapped_keys = [
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+            KeyEvent::new(
+                KeyCode::Char('z'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            KeyEvent::new(
+                KeyCode::Char('l'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            KeyEvent::new(KeyCode::Char('.'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+        ];
+
+        for (open_key, expected_overlay) in [
+            (
+                KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+                OverlayMode::Find,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+                OverlayMode::Replace,
+            ),
+        ] {
+            let cli = Cli {
+                command: None,
+                theme: None,
+                locale: None,
+                files: Vec::new(),
+            };
+            let mut app = TuiApp::from_cli(&cli).unwrap();
+            app.state.insert_text("alpha beta");
+            app.state.insert_text(" gamma");
+
+            let mut clipboard_buf = Vec::new();
+            for _ in 0..5 {
+                app.handle_key_event(
+                    KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT),
+                    &mut clipboard_buf,
+                )
+                .unwrap();
+            }
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &mut clipboard_buf,
+            )
+            .unwrap();
+            clipboard_buf.clear();
+
+            app.handle_key_event(open_key, &mut clipboard_buf).unwrap();
+            assert_eq!(app.state.overlay, expected_overlay);
+
+            let initial_text = app.state.buffers.active().document.text();
+            let initial_selection = app.state.buffers.active().document.selection().clone();
+
+            for key in trapped_keys {
+                let mut bar_state = app.find_bar;
+                let handled = handle_find_bar_key(key, &mut app.state, &mut bar_state).unwrap();
+                assert!(
+                    handled,
+                    "expected {key:?} to be trapped by handle_find_bar_key in {expected_overlay:?}"
+                );
+                assert_eq!(app.state.buffers.active().document.text(), initial_text);
+                assert_eq!(
+                    app.state.buffers.active().document.selection(),
+                    &initial_selection
+                );
+                assert_eq!(app.state.overlay, expected_overlay);
+
+                app.handle_key_event(key, &mut clipboard_buf).unwrap();
+                assert_eq!(
+                    app.state.buffers.active().document.text(),
+                    initial_text,
+                    "document mutated on {key:?} in {expected_overlay:?}"
+                );
+                assert_eq!(
+                    app.state.buffers.active().document.selection(),
+                    &initial_selection,
+                    "selection mutated on {key:?} in {expected_overlay:?}"
+                );
+                assert!(
+                    clipboard_buf.is_empty(),
+                    "OSC 52 clipboard output mutated on {key:?} in {expected_overlay:?}"
+                );
+                assert_eq!(
+                    app.state.overlay, expected_overlay,
+                    "overlay changed on {key:?} in {expected_overlay:?}"
+                );
+            }
+        }
     }
 }
