@@ -204,6 +204,26 @@ impl TuiApp {
         });
     }
 
+    fn sync_find_bar_state(&mut self, prev_overlay: OverlayMode, prev_buffer_id: usize) {
+        let buffer_changed = self.state.buffers.active().id != prev_buffer_id;
+        let overlay_changed = self.state.overlay != prev_overlay;
+        let involves_find_overlay =
+            matches!(prev_overlay, OverlayMode::Find | OverlayMode::Replace)
+                || matches!(self.state.overlay, OverlayMode::Find | OverlayMode::Replace);
+
+        if buffer_changed {
+            self.state.find_replace.matches.clear();
+            self.state.find_replace.active_match = None;
+            if involves_find_overlay {
+                self.find_bar.focus = FindFocus::Query;
+            }
+        }
+
+        if overlay_changed && involves_find_overlay {
+            self.find_bar.focus = FindFocus::Query;
+        }
+    }
+
     pub fn handle_key_event<W: Write>(
         &mut self,
         key: KeyEvent,
@@ -213,10 +233,13 @@ impl TuiApp {
             return Ok(());
         }
         self.follow_cursor = true;
+        let prev_overlay = self.state.overlay;
+        let prev_buffer_id = self.state.buffers.active().id;
 
         match self.state.overlay {
             OverlayMode::Find | OverlayMode::Replace => {
                 if handle_find_bar_key(key, &mut self.state, &mut self.find_bar)? {
+                    self.sync_find_bar_state(prev_overlay, prev_buffer_id);
                     return Ok(());
                 }
             }
@@ -234,6 +257,7 @@ impl TuiApp {
                     &theme_dirs,
                     &dict_dirs,
                 )?;
+                self.sync_find_bar_state(prev_overlay, prev_buffer_id);
                 return Ok(());
             }
             OverlayMode::SpellQuickFix => {
@@ -242,10 +266,12 @@ impl TuiApp {
             }
             OverlayMode::ConfirmQuit | OverlayMode::ConfirmCloseBuffer => {
                 let _ = handle_confirm_modal_key(key, &mut self.state);
+                self.sync_find_bar_state(prev_overlay, prev_buffer_id);
                 return Ok(());
             }
             OverlayMode::OpenFilePrompt | OverlayMode::SaveAsPrompt => {
                 let _ = handle_file_prompt_key(key, &mut self.state)?;
+                self.sync_find_bar_state(prev_overlay, prev_buffer_id);
                 return Ok(());
             }
             OverlayMode::None => {}
@@ -286,6 +312,23 @@ impl TuiApp {
                     self.refresh_palette_entries();
                     self.state.dispatch(Action::OpenCommandPalette)?;
                 }
+                Action::OpenFind | Action::OpenReplace => {
+                    self.find_bar.focus = FindFocus::Query;
+                    self.state.dispatch(action)?;
+                }
+                Action::NextBuffer
+                | Action::PrevBuffer
+                | Action::CloseBuffer
+                | Action::NewBuffer => {
+                    self.state.dispatch(action)?;
+                    self.state.find_replace.matches.clear();
+                    self.state.find_replace.active_match = None;
+                    if matches!(prev_overlay, OverlayMode::Find | OverlayMode::Replace)
+                        || matches!(self.state.overlay, OverlayMode::Find | OverlayMode::Replace)
+                    {
+                        self.find_bar.focus = FindFocus::Query;
+                    }
+                }
                 other => {
                     self.state.dispatch(other)?;
                 }
@@ -303,6 +346,7 @@ impl TuiApp {
             }
         }
 
+        self.sync_find_bar_state(prev_overlay, prev_buffer_id);
         Ok(())
     }
 
@@ -359,7 +403,11 @@ impl TuiApp {
             total_area: frame.total_area,
         };
 
-        self.mouse.handle_mouse(mouse, &mut self.state, &ctx)
+        let prev_overlay = self.state.overlay;
+        let prev_buffer_id = self.state.buffers.active().id;
+        let handled = self.mouse.handle_mouse(mouse, &mut self.state, &ctx)?;
+        self.sync_find_bar_state(prev_overlay, prev_buffer_id);
+        Ok(handled)
     }
 
     pub fn handle_paste_event(&mut self, text: &str) -> ScriptuiResult<()> {
@@ -963,5 +1011,107 @@ mod tests {
         )
         .expect_err("BrokenPipe on read should propagate");
         assert_eq!(read_broken_pipe.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn find_bar_focus_and_matches_reset_across_buffer_switch() {
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).expect("TuiApp should initialize from CLI");
+        app.state.insert_text("foo bar foo");
+        app.state.buffers.new_buffer();
+        app.state.insert_text("baz qux");
+        app.state.buffers.switch_to(0);
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+H should open Replace");
+        assert_eq!(app.state.overlay, OverlayMode::Replace);
+        assert_eq!(app.find_bar.focus, FindFocus::Query);
+
+        for ch in "foo".chars() {
+            app.handle_key_event(
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+                &mut clipboard_buf,
+            )
+            .expect("typing find query should succeed");
+        }
+        assert_eq!(app.state.find_replace.matches.len(), 2);
+        assert_eq!(app.state.find_replace.active_match, Some(0));
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Tab should focus Replacement");
+        assert_eq!(app.find_bar.focus, FindFocus::Replacement);
+
+        // Close Replace, switch to buffer 1 via NextBuffer (Ctrl+PageDown), and reopen Replace
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Esc should close Replace");
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+PageDown should switch to buffer 1");
+        assert_eq!(app.state.buffers.active_index(), 1);
+        assert!(app.state.find_replace.matches.is_empty());
+        assert_eq!(app.state.find_replace.active_match, None);
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .expect("Ctrl+H should reopen Replace");
+        assert_eq!(app.state.overlay, OverlayMode::Replace);
+        assert!(app.state.find_replace.matches.is_empty());
+        assert_eq!(app.state.find_replace.active_match, None);
+        assert_eq!(app.find_bar.focus, FindFocus::Query);
+
+        // Also verify mouse tab click while Replace is open resets matches and focus
+        app.state.buffers.switch_to(0);
+        app.state
+            .update_find_matches()
+            .expect("update_find_matches should succeed");
+        assert_eq!(app.state.find_replace.matches.len(), 2);
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .expect("Tab should focus Replacement");
+        assert_eq!(app.find_bar.focus, FindFocus::Replacement);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| app.render_frame(frame))
+            .expect("render_frame should succeed");
+        let second_tab = app
+            .last_frame
+            .as_ref()
+            .expect("last_frame should be populated")
+            .tab_hitboxes[1]
+            .rect;
+        app.handle_mouse_event(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: second_tab.x,
+            row: second_tab.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("tab click should succeed");
+        assert_eq!(app.state.buffers.active_index(), 1);
+        assert!(app.state.find_replace.matches.is_empty());
+        assert_eq!(app.state.find_replace.active_match, None);
+        assert_eq!(app.find_bar.focus, FindFocus::Query);
     }
 }

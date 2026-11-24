@@ -105,12 +105,26 @@ pub fn render_find_bar(
     frame.render_widget(widget, area);
 }
 
+fn is_passthrough_shortcut(key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char(c) if key.modifiers == KeyModifiers::CONTROL => {
+            matches!(c.to_ascii_lowercase(), 'f' | 'h' | 'q' | 's')
+        }
+        KeyCode::F(3) => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
+        _ => false,
+    }
+}
+
 pub fn handle_find_bar_key(
     key: KeyEvent,
     state: &mut EditorState,
     bar_state: &mut FindBarState,
 ) -> ScriptuiResult<bool> {
     if !matches!(state.overlay, OverlayMode::Find | OverlayMode::Replace) {
+        return Ok(false);
+    }
+
+    if is_passthrough_shortcut(key) {
         return Ok(false);
     }
 
@@ -154,7 +168,7 @@ pub fn handle_find_bar_key(
                 }
                 Ok(true)
             } else {
-                Ok(false)
+                Ok(true)
             }
         }
         KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -163,20 +177,18 @@ pub fn handle_find_bar_key(
                     state.find_replace.query.case_sensitive =
                         !state.find_replace.query.case_sensitive;
                     refresh_find_matches(state)?;
-                    Ok(true)
                 }
                 'w' => {
                     state.find_replace.query.whole_word = !state.find_replace.query.whole_word;
                     refresh_find_matches(state)?;
-                    Ok(true)
                 }
                 'r' => {
                     state.find_replace.query.use_regex = !state.find_replace.query.use_regex;
                     refresh_find_matches(state)?;
-                    Ok(true)
                 }
-                _ => Ok(false),
+                _ => {}
             }
+            Ok(true)
         }
         KeyCode::Backspace => {
             let editing_replacement =
@@ -189,10 +201,23 @@ pub fn handle_find_bar_key(
             }
             Ok(true)
         }
+        KeyCode::Delete
+        | KeyCode::Left
+        | KeyCode::Right
+        | KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::Home
+        | KeyCode::End
+        | KeyCode::PageUp
+        | KeyCode::PageDown => Ok(true),
         KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::HYPER
+                    | KeyModifiers::META,
+            ) =>
         {
             let editing_replacement =
                 state.overlay == OverlayMode::Replace && bar_state.focus == FindFocus::Replacement;
@@ -204,7 +229,7 @@ pub fn handle_find_bar_key(
             }
             Ok(true)
         }
-        _ => Ok(false),
+        _ => Ok(true),
     }
 }
 
@@ -302,5 +327,79 @@ mod tests {
         assert!(handled);
         assert_eq!(state.overlay, OverlayMode::None);
         assert_eq!(state.buffers.active().document.selection().len(), 2);
+    }
+
+    #[test]
+    fn find_bar_consumes_navigation_and_delete_keys() {
+        use crate::app::TuiApp;
+        use crate::cli::Cli;
+
+        let mut state = EditorState::new(AppConfig::default()).unwrap();
+        state.insert_text("alpha beta\ngamma delta");
+        state.overlay = OverlayMode::Find;
+        let mut bar_state = FindBarState::default();
+
+        let consumed_keys = [
+            KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+        ];
+
+        for key in consumed_keys {
+            let handled = handle_find_bar_key(key, &mut state, &mut bar_state).unwrap();
+            assert!(handled, "expected {key:?} to be consumed by find bar");
+        }
+
+        let passthrough_keys = [
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        ];
+        for key in passthrough_keys {
+            let handled = handle_find_bar_key(key, &mut state, &mut bar_state).unwrap();
+            assert!(!handled, "expected {key:?} to pass through to app");
+        }
+
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).unwrap();
+        app.state.insert_text("alpha beta\ngamma delta");
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+            &mut clipboard_buf,
+        )
+        .unwrap();
+        let initial_text = app.state.buffers.active().document.text();
+        let initial_selection = app.state.buffers.active().document.selection().clone();
+
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .unwrap();
+        assert_eq!(app.state.overlay, OverlayMode::Find);
+
+        for key in consumed_keys {
+            app.handle_key_event(key, &mut clipboard_buf).unwrap();
+            assert_eq!(app.state.buffers.active().document.text(), initial_text);
+            assert_eq!(
+                app.state.buffers.active().document.selection(),
+                &initial_selection
+            );
+        }
     }
 }
