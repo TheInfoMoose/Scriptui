@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0073"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T05:39:37Z"
-updated_at = "2026-11-24T05:39:37Z"
+updated_at = "2026-11-24T05:56:33Z"
 source_ref = "STEP 13C"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0073@2026-11-24T05:52:45Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "82f06dc"
+summary = "STEP 13C: Core Symlink Containment, Locale Rename Rollback, Max File Size & Empty Insert Guard (phased check PASS)"
