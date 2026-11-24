@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0066"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T04:40:46Z"
-updated_at = "2026-11-24T04:40:46Z"
+updated_at = "2026-11-24T05:00:02Z"
 source_ref = "STEP 12B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0066@2026-11-24T04:56:55Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "eff070c"
+summary = "STEP 12B: UTF-8 Safe Task-List Parsing, `O_EXCL` Atomic File I/O & Buffer Helpers (`BUG-0017`, `BUG-0020` part 1, `BUG-0025`) (phased check PASS)"
