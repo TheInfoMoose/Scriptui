@@ -7,12 +7,29 @@ use scriptui_core::{EditorState, PreviewDocument};
 
 use crate::layout_tree::{rgb_to_color, segment_to_style};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+struct CachedPreview {
+    doc_id: u64,
+    doc_revision: u64,
+    theme_name: String,
+    inner_width: usize,
+    preview_doc: PreviewDocument,
+}
+
+#[derive(Debug, Clone)]
 pub struct PreviewPaneState {
     pub scroll_line: usize,
     pub total_lines: usize,
     pub viewport_height: usize,
     pub sync_enabled: bool,
+    cache: Option<CachedPreview>,
+    rebuild_count: u64,
+}
+
+impl PreviewPaneState {
+    pub fn rebuild_count(&self) -> u64 {
+        self.rebuild_count
+    }
 }
 
 impl Default for PreviewPaneState {
@@ -22,6 +39,8 @@ impl Default for PreviewPaneState {
             total_lines: 0,
             viewport_height: 0,
             sync_enabled: true,
+            cache: None,
+            rebuild_count: 0,
         }
     }
 }
@@ -53,13 +72,40 @@ pub fn render_preview_pane(
     let inner_width = area.width.saturating_sub(2).max(1) as usize;
     let inner_height = area.height.saturating_sub(2).max(1) as usize;
 
-    let preview_doc = state.build_active_preview(inner_width);
+    let active_doc = &state.buffers.active().document;
+    let doc_id = active_doc.doc_id();
+    let doc_revision = active_doc.revision();
+    let theme_name = state.theme.name.as_str();
+
+    let cache_hit = pane_state.cache.as_ref().is_some_and(|cached| {
+        cached.doc_id == doc_id
+            && cached.doc_revision == doc_revision
+            && cached.theme_name == theme_name
+            && cached.inner_width == inner_width
+    });
+
+    if !cache_hit {
+        let preview_doc = state.build_active_preview(inner_width);
+        pane_state.cache = Some(CachedPreview {
+            doc_id,
+            doc_revision,
+            theme_name: theme_name.to_string(),
+            inner_width,
+            preview_doc,
+        });
+        pane_state.rebuild_count = pane_state.rebuild_count.saturating_add(1);
+    }
+
+    let Some(cached) = pane_state.cache.as_ref() else {
+        return;
+    };
+    let preview_doc = &cached.preview_doc;
     pane_state.total_lines = preview_doc.lines.len();
     pane_state.viewport_height = inner_height;
 
     if pane_state.sync_enabled {
         pane_state.scroll_line =
-            compute_synced_preview_scroll(&preview_doc, editor_top_source_line, inner_height);
+            compute_synced_preview_scroll(preview_doc, editor_top_source_line, inner_height);
     } else {
         pane_state.scroll_line = pane_state
             .scroll_line
@@ -119,7 +165,9 @@ pub fn render_preview_pane(
 mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use scriptui_core::{AppConfig, DocumentBuffer, EditorState};
+    use scriptui_core::{
+        builtin_theme_names, resolve_theme, AppConfig, DocumentBuffer, EditorState,
+    };
 
     use super::*;
 
@@ -200,5 +248,82 @@ mod tests {
             scroll_tail >= scroll_mid,
             "expected scroll_tail ({scroll_tail}) >= scroll_mid ({scroll_mid})"
         );
+    }
+
+    #[test]
+    fn render_preview_pane_caches_until_doc_theme_or_width_changes() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        let md = concat!(
+            "# Cached Preview\n",
+            "\n",
+            "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\n",
+            "Line 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\n",
+            "\n",
+            "## Bottom Section\n",
+            "\n",
+            "Trailing paragraph for scroll sync.\n",
+        );
+        state.buffers.active_mut().document = DocumentBuffer::from_str_content(md);
+
+        let mut terminal = Terminal::new(TestBackend::new(60, 16)).expect("test terminal");
+        let mut pane_state = PreviewPaneState::default();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 60, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 0);
+            })
+            .expect("first draw");
+        assert_eq!(pane_state.rebuild_count(), 1);
+        let initial_scroll = pane_state.scroll_line;
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 60, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 12);
+            })
+            .expect("second draw with different scroll line");
+        assert_eq!(pane_state.rebuild_count(), 1);
+        assert!(pane_state.scroll_line > initial_scroll);
+
+        state.insert_text("!");
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 60, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 12);
+            })
+            .expect("draw after document edit");
+        assert_eq!(pane_state.rebuild_count(), 2);
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 12);
+            })
+            .expect("draw after width change");
+        assert_eq!(pane_state.rebuild_count(), 3);
+
+        let alternate_theme_name = builtin_theme_names()
+            .iter()
+            .copied()
+            .find(|name| *name != state.theme.name)
+            .expect("at least one alternate builtin theme");
+        state.theme =
+            resolve_theme(alternate_theme_name, &[]).expect("resolve alternate builtin theme");
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 12);
+            })
+            .expect("draw after theme change");
+        assert_eq!(pane_state.rebuild_count(), 4);
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 16);
+                render_preview_pane(frame, area, &state, &mut pane_state, 0);
+            })
+            .expect("repeat draw at (40, 16)");
+        assert_eq!(pane_state.rebuild_count(), 4);
     }
 }

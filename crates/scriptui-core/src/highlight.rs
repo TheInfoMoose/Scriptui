@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::sync::LazyLock;
 
 use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 
@@ -77,15 +78,21 @@ pub fn style_for_md_token(kind: MdTokenKind, palette: &ThemePalette) -> (RgbColo
     }
 }
 
+static DEFAULT_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+
 pub struct CodeHighlighter {
-    syntax_set: SyntaxSet,
+    syntax_set: &'static SyntaxSet,
 }
 
 impl CodeHighlighter {
     pub fn new() -> Self {
         Self {
-            syntax_set: SyntaxSet::load_defaults_newlines(),
+            syntax_set: &DEFAULT_SYNTAX_SET,
         }
+    }
+
+    pub fn syntax_set_ptr(&self) -> *const SyntaxSet {
+        std::ptr::from_ref(self.syntax_set)
     }
 
     pub fn highlight_block(
@@ -110,7 +117,7 @@ impl CodeHighlighter {
                 line_with_nl.push('\n');
             }
 
-            let Ok(ops) = parse_state.parse_line(&line_with_nl, &self.syntax_set) else {
+            let Ok(ops) = parse_state.parse_line(&line_with_nl, self.syntax_set) else {
                 if line.is_empty() {
                     result.push(Vec::new());
                 } else {
@@ -433,5 +440,19 @@ mod tests {
             .expect("expected 'wrld' segment");
         assert_eq!(wrld_seg.fg, theme.palette.spell_error);
         assert!(wrld_seg.flags.underline);
+    }
+
+    #[test]
+    fn code_highlighter_reuses_static_syntax_set() {
+        let first = CodeHighlighter::new();
+        let second = CodeHighlighter::new();
+        assert_eq!(first.syntax_set_ptr(), second.syntax_set_ptr());
+
+        let palette = default_theme().expect("default theme").palette;
+        let lines = ["fn greet() -> &'static str {", "    \"hello\"", "}"];
+        let highlighted_first = first.highlight_block("rust", &lines, &palette);
+        let highlighted_second = second.highlight_block("rust", &lines, &palette);
+        assert_eq!(highlighted_first, highlighted_second);
+        assert_eq!(highlighted_first.len(), lines.len());
     }
 }
