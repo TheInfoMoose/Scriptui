@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0062"
 type = "task"
 title = "Add third-party license notice (en_US dicts, spellbook MPL-2.0) and complete Cargo.toml release metadata"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-23T14:34:51Z"
-updated_at = "2026-11-23T14:35:26Z"
+updated_at = "2026-11-24T05:27:15Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "615cc6d"
+summary = "Closed in Phase 12 review (STEP 12A: THIRD_PARTY_LICENSES.md and Cargo.toml release metadata)"

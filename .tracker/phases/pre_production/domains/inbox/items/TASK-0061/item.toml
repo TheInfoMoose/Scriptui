@@ -4,11 +4,11 @@ schema_version = 2
 id = "TASK-0061"
 type = "task"
 title = "Allow crates/scriptui-tui/Cargo.toml update for cargo-deny wildcard check"
-status = "pending"
+status = "closed"
 severity = "high"
 scope_ref = "inbox"
 created_at = "2026-11-23T13:13:44Z"
-updated_at = "2026-11-23T13:13:44Z"
+updated_at = "2026-11-24T05:27:13Z"
 
 [effort]
 logged_time_minutes = 0
@@ -16,4 +16,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "615cc6d"
+summary = "Closed in Phase 12 review (STEP 12A: pinned scriptui-core version in scriptui-tui/Cargo.toml)"
