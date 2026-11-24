@@ -236,6 +236,7 @@ pub struct EditorState {
     pub file_prompt_input: String,
     pub status_message: Option<String>,
     pub should_quit: bool,
+    clipboard: String,
     spell_revision: u64,
     analysis_cache: Option<AnalysisCache>,
     analysis_recomputes: u64,
@@ -243,14 +244,47 @@ pub struct EditorState {
 
 impl EditorState {
     pub fn new(config: AppConfig) -> ScriptuiResult<Self> {
-        let theme = match resolve_theme(&config.theme, &[]) {
+        Self::new_with_dirs(config, &[], &[])
+    }
+
+    pub fn new_with_dirs(
+        config: AppConfig,
+        theme_dirs: &[PathBuf],
+        dict_dirs: &[PathBuf],
+    ) -> ScriptuiResult<Self> {
+        let mut warnings = Vec::new();
+        let theme = match resolve_theme(&config.theme, theme_dirs) {
             Ok(theme) => theme,
-            Err(_) => default_theme()?,
+            Err(_) => {
+                warnings.push(format!(
+                    "Theme '{}' unavailable; using default theme",
+                    config.theme
+                ));
+                default_theme()?
+            }
         };
         let spell_engine = if config.spell_enabled {
-            SpellEngine::default_en_us().ok()
+            if config.spell_locale.is_empty() || config.spell_locale == "en_US" {
+                SpellEngine::default_en_us().ok()
+            } else {
+                match SpellEngine::load_locale(&config.spell_locale, dict_dirs) {
+                    Ok(engine) => Some(engine),
+                    Err(_) => {
+                        warnings.push(format!(
+                            "Spell locale '{}' unavailable; using en_US",
+                            config.spell_locale
+                        ));
+                        SpellEngine::default_en_us().ok()
+                    }
+                }
+            }
         } else {
             None
+        };
+        let status_message = if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.join("; "))
         };
 
         Ok(Self {
@@ -265,12 +299,21 @@ impl EditorState {
             spell_popup: None,
             spell_engine,
             file_prompt_input: String::new(),
-            status_message: None,
+            status_message,
             should_quit: false,
+            clipboard: String::new(),
             spell_revision: 0,
             analysis_cache: None,
             analysis_recomputes: 0,
         })
+    }
+
+    pub fn clipboard(&self) -> &str {
+        &self.clipboard
+    }
+
+    pub fn set_clipboard(&mut self, text: impl Into<String>) {
+        self.clipboard = text.into();
     }
 
     pub fn active_analysis(&mut self) -> (&GfmDocument, &[SpellDiagnostic]) {
@@ -621,7 +664,9 @@ impl EditorState {
                     self.file_prompt_input.clear();
                     self.overlay = OverlayMode::SaveAsPrompt;
                 } else {
-                    self.buffers.active_mut().document.save_atomic()?;
+                    let active = self.buffers.active_mut();
+                    active.document.save_atomic()?;
+                    active.history.mark_saved();
                     self.status_message = Some("Saved".to_string());
                 }
             }
@@ -717,19 +762,24 @@ impl EditorState {
                 doc.set_selection(sel);
             }
             Action::Cut => {
-                let has_selection = self
-                    .buffers
-                    .active()
-                    .document
-                    .selection()
-                    .ranges()
-                    .iter()
-                    .any(|sel| !sel.is_empty());
-                if has_selection {
+                let selected = self.selected_text();
+                if !selected.is_empty() {
+                    self.clipboard = selected;
                     self.handle_delete(true);
                 }
             }
-            Action::Copy | Action::Paste => {}
+            Action::Copy => {
+                let selected = self.selected_text();
+                if !selected.is_empty() {
+                    self.clipboard = selected;
+                }
+            }
+            Action::Paste => {
+                if !self.clipboard.is_empty() {
+                    let text = self.clipboard.clone();
+                    self.insert_text(&text);
+                }
+            }
             Action::MoveLeft => self.move_primary_selection(CursorMove::Left, false),
             Action::MoveRight => self.move_primary_selection(CursorMove::Right, false),
             Action::MoveUp => self.move_primary_selection(CursorMove::Up, false),
@@ -1352,5 +1402,106 @@ mod tests {
         let (_, diags_after_reload) = editor.active_analysis();
         assert!(diags_after_reload.is_empty());
         assert_eq!(editor.analysis_recompute_count(), 3);
+    }
+
+    #[test]
+    fn editor_copy_cut_and_paste_roundtrip_via_internal_clipboard() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("hello world");
+
+        // Select "hello", copy, move to end, paste -> "hello worldhello".
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![Selection::new(0, 5)]));
+        editor.dispatch(Action::Copy).unwrap();
+        assert_eq!(editor.clipboard(), "hello");
+
+        let end = editor.buffers.active().document.len_chars();
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(end));
+        editor.dispatch(Action::Paste).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "hello worldhello");
+
+        // Select "world" (6..11), cut, then paste to restore and verify undoable transactions.
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![Selection::new(6, 11)]));
+        editor.dispatch(Action::Cut).unwrap();
+        assert_eq!(editor.clipboard(), "world");
+        assert_eq!(editor.buffers.active().document.text(), "hello hello");
+
+        editor.dispatch(Action::Paste).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "hello worldhello");
+
+        editor.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "hello hello");
+        editor.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "hello worldhello");
+    }
+
+    #[test]
+    fn editor_new_with_dirs_loads_custom_theme_and_locale_or_warns() {
+        let theme_dir = tempfile::tempdir().unwrap();
+        let dict_dir = tempfile::tempdir().unwrap();
+
+        let mut custom_theme = default_theme().unwrap();
+        custom_theme.name = "custom_retro".to_string();
+        let theme_toml = toml::to_string(&custom_theme).unwrap();
+        std::fs::write(theme_dir.path().join("custom_retro.toml"), theme_toml).unwrap();
+
+        std::fs::write(
+            dict_dir.path().join("de_DE.aff"),
+            "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n",
+        )
+        .unwrap();
+        std::fs::write(dict_dir.path().join("de_DE.dic"), "1\nhallo\n").unwrap();
+
+        let valid_config = AppConfig {
+            theme: "custom_retro".to_string(),
+            spell_enabled: true,
+            spell_locale: "de_DE".to_string(),
+            ..AppConfig::default()
+        };
+        let editor = EditorState::new_with_dirs(
+            valid_config,
+            &[theme_dir.path().to_path_buf()],
+            &[dict_dir.path().to_path_buf()],
+        )
+        .unwrap();
+        assert_eq!(editor.theme.name, "custom_retro");
+        assert!(editor.status_message.is_none());
+        let engine = editor
+            .spell_engine
+            .as_ref()
+            .expect("custom spell engine should be loaded");
+        assert!(engine.is_correct("hallo"));
+
+        let missing_config = AppConfig {
+            theme: "nonexistent_theme".to_string(),
+            spell_enabled: true,
+            spell_locale: "zz_ZZ".to_string(),
+            ..AppConfig::default()
+        };
+        let fallback = EditorState::new_with_dirs(
+            missing_config,
+            &[theme_dir.path().to_path_buf()],
+            &[dict_dir.path().to_path_buf()],
+        )
+        .unwrap();
+        assert_eq!(fallback.theme.name, "crt_amber");
+        assert!(fallback.spell_engine.is_some());
+        let warning = fallback
+            .status_message
+            .as_deref()
+            .expect("fallback should record a warning in status_message");
+        assert!(warning.contains("nonexistent_theme"));
+        assert!(warning.contains("zz_ZZ"));
     }
 }

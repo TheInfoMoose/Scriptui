@@ -292,11 +292,9 @@ pub fn handle_file_prompt_key(key: KeyEvent, state: &mut EditorState) -> Scriptu
                         state.overlay = OverlayMode::None;
                     }
                     OverlayMode::SaveAsPrompt => {
-                        state
-                            .buffers
-                            .active_mut()
-                            .document
-                            .save_as_atomic(PathBuf::from(&path))?;
+                        let active = state.buffers.active_mut();
+                        active.document.save_as_atomic(PathBuf::from(&path))?;
+                        active.history.mark_saved();
                         state.status_message = Some(format!("Saved {path}"));
                         state.overlay = OverlayMode::None;
                     }
