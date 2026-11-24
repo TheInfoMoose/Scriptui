@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0077"
 type = "task"
 title = "tui"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T15:19:07Z"
-updated_at = "2026-11-24T15:19:07Z"
+updated_at = "2026-11-24T18:45:30Z"
 source_ref = "STEP 14A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0077@2026-11-24T18:41:50Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "be6c288"
+summary = "STEP 14A: Find/Replace Global Shortcut Passthrough & Modal/Palette Modifier Filtering (phased check PASS)"
