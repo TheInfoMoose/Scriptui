@@ -318,9 +318,13 @@ pub fn handle_palette_key(
             Ok(true)
         }
         KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::HYPER
+                    | KeyModifiers::META,
+            ) =>
         {
             state.palette.query.push(c);
             state.palette.selected_index = 0;
@@ -452,5 +456,34 @@ mod tests {
                 && entry.label == "Theme: solarized"
                 && entry.kind == PaletteItemKind::Theme("solarized".to_string())
         }));
+    }
+
+    #[test]
+    fn palette_ignores_super_hyper_meta_char_input() {
+        let mut state = EditorState::new(AppConfig::default()).unwrap();
+        let entries = build_palette_entries(&[]);
+        state.overlay = OverlayMode::CommandPalette;
+        state.palette.query.clear();
+
+        for key in [
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::SUPER),
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::HYPER),
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::META),
+        ] {
+            let handled = handle_palette_key(key, &mut state, &entries, &[], &[]).unwrap();
+            assert!(!handled, "expected {key:?} to be ignored by palette");
+            assert!(state.palette.query.is_empty());
+        }
+
+        let handled = handle_palette_key(
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
+            &mut state,
+            &entries,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(handled);
+        assert_eq!(state.palette.query, "t");
     }
 }

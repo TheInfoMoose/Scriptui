@@ -203,12 +203,26 @@ pub fn handle_confirm_modal_key(key: KeyEvent, state: &mut EditorState) -> bool 
         return false;
     }
 
+    let disallowed_char_mods = KeyModifiers::CONTROL
+        | KeyModifiers::ALT
+        | KeyModifiers::SUPER
+        | KeyModifiers::HYPER
+        | KeyModifiers::META;
+
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+        KeyCode::Char('y' | 'Y') if !key.modifiers.intersects(disallowed_char_mods) => {
             state.confirm_dirty_action(true);
             true
         }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+        KeyCode::Enter if key.modifiers.is_empty() => {
+            state.confirm_dirty_action(true);
+            true
+        }
+        KeyCode::Char('n' | 'N') if !key.modifiers.intersects(disallowed_char_mods) => {
+            state.confirm_dirty_action(false);
+            true
+        }
+        KeyCode::Esc if key.modifiers.is_empty() => {
             state.confirm_dirty_action(false);
             true
         }
@@ -275,9 +289,13 @@ pub fn handle_file_prompt_key(key: KeyEvent, state: &mut EditorState) -> Scriptu
             Ok(true)
         }
         KeyCode::Char(c)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::HYPER
+                    | KeyModifiers::META,
+            ) =>
         {
             state.file_prompt_input.push(c);
             Ok(true)
@@ -432,5 +450,50 @@ mod tests {
         assert!(target_path.exists());
         let saved = std::fs::read_to_string(&target_path).unwrap();
         assert_eq!(saved, "hello wrld");
+    }
+
+    #[test]
+    fn modals_ignore_super_hyper_meta_and_modified_confirm_keys() {
+        let mut state = EditorState::new(AppConfig::default()).unwrap();
+        state.overlay = OverlayMode::OpenFilePrompt;
+        state.file_prompt_input.clear();
+
+        for key in [
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::SUPER),
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::HYPER),
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::META),
+        ] {
+            let handled = handle_file_prompt_key(key, &mut state).unwrap();
+            assert!(!handled, "expected {key:?} to be ignored by file prompt");
+            assert!(state.file_prompt_input.is_empty());
+        }
+
+        let handled = handle_file_prompt_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            &mut state,
+        )
+        .unwrap();
+        assert!(handled);
+        assert_eq!(state.file_prompt_input, "a");
+
+        state.overlay = OverlayMode::ConfirmQuit;
+        for key in [
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::SUPER),
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+        ] {
+            assert!(
+                !handle_confirm_modal_key(key, &mut state),
+                "expected {key:?} to be ignored by confirm modal"
+            );
+            assert_eq!(state.overlay, OverlayMode::ConfirmQuit);
+        }
+
+        assert!(handle_confirm_modal_key(
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+            &mut state,
+        ));
+        assert_eq!(state.overlay, OverlayMode::None);
     }
 }

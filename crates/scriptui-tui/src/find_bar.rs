@@ -105,26 +105,12 @@ pub fn render_find_bar(
     frame.render_widget(widget, area);
 }
 
-fn is_passthrough_shortcut(key: KeyEvent) -> bool {
-    match key.code {
-        KeyCode::Char(c) if key.modifiers == KeyModifiers::CONTROL => {
-            matches!(c.to_ascii_lowercase(), 'f' | 'h' | 'q' | 's')
-        }
-        KeyCode::F(3) => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
-        _ => false,
-    }
-}
-
 pub fn handle_find_bar_key(
     key: KeyEvent,
     state: &mut EditorState,
     bar_state: &mut FindBarState,
 ) -> ScriptuiResult<bool> {
     if !matches!(state.overlay, OverlayMode::Find | OverlayMode::Replace) {
-        return Ok(false);
-    }
-
-    if is_passthrough_shortcut(key) {
         return Ok(false);
     }
 
@@ -171,24 +157,34 @@ pub fn handle_find_bar_key(
                 Ok(true)
             }
         }
-        KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::ALT) => {
+        KeyCode::Char(c)
+            if key.modifiers.contains(KeyModifiers::ALT)
+                && !key.modifiers.intersects(
+                    KeyModifiers::CONTROL
+                        | KeyModifiers::SUPER
+                        | KeyModifiers::HYPER
+                        | KeyModifiers::META,
+                ) =>
+        {
             match c.to_ascii_lowercase() {
                 'c' => {
                     state.find_replace.query.case_sensitive =
                         !state.find_replace.query.case_sensitive;
                     refresh_find_matches(state)?;
+                    Ok(true)
                 }
                 'w' => {
                     state.find_replace.query.whole_word = !state.find_replace.query.whole_word;
                     refresh_find_matches(state)?;
+                    Ok(true)
                 }
                 'r' => {
                     state.find_replace.query.use_regex = !state.find_replace.query.use_regex;
                     refresh_find_matches(state)?;
+                    Ok(true)
                 }
-                _ => {}
+                _ => Ok(false),
             }
-            Ok(true)
         }
         KeyCode::Backspace => {
             let editing_replacement =
@@ -209,7 +205,17 @@ pub fn handle_find_bar_key(
         | KeyCode::Home
         | KeyCode::End
         | KeyCode::PageUp
-        | KeyCode::PageDown => Ok(true),
+        | KeyCode::PageDown
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::HYPER
+                    | KeyModifiers::META,
+            ) =>
+        {
+            Ok(true)
+        }
         KeyCode::Char(c)
             if !key.modifiers.intersects(
                 KeyModifiers::CONTROL
@@ -229,7 +235,7 @@ pub fn handle_find_bar_key(
             }
             Ok(true)
         }
-        _ => Ok(true),
+        _ => Ok(false),
     }
 }
 
@@ -401,5 +407,71 @@ mod tests {
                 &initial_selection
             );
         }
+    }
+
+    #[test]
+    fn find_bar_passes_through_global_shortcuts_and_resets_on_ctrl_pagedown() {
+        use crate::app::TuiApp;
+        use crate::cli::Cli;
+
+        let mut state = EditorState::new(AppConfig::default()).unwrap();
+        state.overlay = OverlayMode::Find;
+        let mut bar_state = FindBarState::default();
+
+        let passthrough_keys = [
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+            KeyEvent::new(
+                KeyCode::Char('s'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            KeyEvent::new(
+                KeyCode::Char('p'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
+        ];
+
+        for key in passthrough_keys {
+            let handled = handle_find_bar_key(key, &mut state, &mut bar_state).unwrap();
+            assert!(!handled, "expected {key:?} to pass through find bar");
+        }
+
+        let cli = Cli {
+            command: None,
+            theme: None,
+            locale: None,
+            files: Vec::new(),
+        };
+        let mut app = TuiApp::from_cli(&cli).unwrap();
+        app.state.insert_text("foo bar foo");
+        app.state.dispatch(Action::NewBuffer).unwrap();
+        app.state.insert_text("foo baz foo");
+        app.state.find_replace.query.pattern = "foo".to_string();
+        app.state.update_find_matches().unwrap();
+        assert!(!app.state.find_replace.matches.is_empty());
+        assert!(app.state.find_replace.active_match.is_some());
+
+        app.state.overlay = OverlayMode::Replace;
+        app.find_bar.focus = FindFocus::Replacement;
+        let prev_buffer_id = app.state.buffers.active().id;
+
+        let mut clipboard_buf = Vec::new();
+        app.handle_key_event(
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL),
+            &mut clipboard_buf,
+        )
+        .unwrap();
+
+        assert_ne!(app.state.buffers.active().id, prev_buffer_id);
+        assert!(app.state.find_replace.matches.is_empty());
+        assert!(app.state.find_replace.active_match.is_none());
+        assert_eq!(app.find_bar.focus, FindFocus::Query);
     }
 }
