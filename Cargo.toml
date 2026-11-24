@@ -10,6 +10,8 @@ description = "Retro-futuristic Ratatui text editor and Markdown IDE baseline"
 readme = "README.md"
 keywords = ["editor", "markdown", "tui", "terminal", "ratatui"]
 categories = ["text-editors", "command-line-utilities"]
+repository = "https://github.com/TheInfoMoose/Scriptui"
+rust-version = "1.80"
 
 [profile.release]
 opt-level = 3
