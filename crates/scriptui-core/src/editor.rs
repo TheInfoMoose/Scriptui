@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::buffer::BufferEdit;
@@ -842,66 +843,98 @@ impl EditorState {
     }
 
     fn handle_insert_newline(&mut self) -> ScriptuiResult<()> {
-        let (current_line, in_code_block, clear_lines) = {
+        enum CursorEnterPlan {
+            ClearLine { line_start: usize },
+            Insert { start: usize, inserted_chars: usize },
+        }
+
+        let (selection_before, plans, mut planned_edits) = {
             let doc = &self.buffers.active().document;
+            let selection_before = doc.selection().clone();
             let text = doc.text();
-            let pos = doc.char_to_position(doc.selection().primary().head);
+            let len_chars = doc.len_chars();
             let gfm = parse_gfm(&text);
-            let in_code_block = gfm.is_line_in_code_block(pos.line).is_some();
-            let current_line = doc.line_text(pos.line).ok_or(ScriptuiError::OutOfBounds {
-                offset: pos.line,
-                len: doc.len_lines(),
-            })?;
 
-            let mut candidate_lines: Vec<usize> = doc
-                .selection()
-                .ranges()
-                .iter()
-                .map(|sel| doc.char_to_position(sel.head).line)
-                .collect();
-            candidate_lines.sort_unstable();
-            candidate_lines.dedup();
+            let mut plans = Vec::with_capacity(selection_before.len());
+            let mut planned_edits: Vec<(usize, usize, String)> =
+                Vec::with_capacity(selection_before.len());
+            let mut cleared_lines = HashSet::new();
 
-            let mut clear_lines = Vec::new();
-            for line in candidate_lines {
+            for sel in selection_before.ranges() {
+                let sel_start = sel.start().min(len_chars);
+                let sel_end = sel.end().min(len_chars);
+                let line = doc.char_to_position(sel.head.min(len_chars)).line;
                 let line_in_code = gfm.is_line_in_code_block(line).is_some();
-                if let Some(line_text) = doc.line_text(line) {
-                    if compute_enter_indent(&line_text, line_in_code, self.config.indent)
-                        == EnterOutcome::ClearCurrentLine
-                    {
-                        clear_lines.push((line, line_text.chars().count()));
+                let line_text = doc.line_text(line).ok_or(ScriptuiError::OutOfBounds {
+                    offset: line,
+                    len: doc.len_lines(),
+                })?;
+
+                match compute_enter_indent(&line_text, line_in_code, self.config.indent) {
+                    EnterOutcome::ClearCurrentLine => {
+                        let line_start = doc.position_to_char(Position { line, col: 0 });
+                        let line_end = line_start + line_text.chars().count();
+                        if cleared_lines.insert(line) {
+                            planned_edits.push((line_start, line_end, String::new()));
+                        }
+                        plans.push(CursorEnterPlan::ClearLine { line_start });
+                    }
+                    EnterOutcome::Insert(insert_text) => {
+                        let inserted_chars = insert_text.chars().count();
+                        planned_edits.push((sel_start, sel_end, insert_text));
+                        plans.push(CursorEnterPlan::Insert {
+                            start: sel_start,
+                            inserted_chars,
+                        });
                     }
                 }
             }
 
-            (current_line, in_code_block, clear_lines)
+            (selection_before, plans, planned_edits)
         };
 
-        match compute_enter_indent(&current_line, in_code_block, self.config.indent) {
-            EnterOutcome::Insert(text) => {
-                self.insert_text(&text);
-            }
-            EnterOutcome::ClearCurrentLine => {
-                let active = self.buffers.active_mut();
-                let selection_before = active.document.selection().clone();
-                let mut edits = Vec::with_capacity(clear_lines.len());
-                for (line, line_len) in clear_lines.into_iter().rev() {
-                    let line_start = active.document.position_to_char(Position { line, col: 0 });
-                    let line_end = line_start + line_len;
-                    let edit = active.document.apply_raw_edit(line_start, line_end, "")?;
-                    edits.push(edit);
-                }
-                let next_selection =
-                    shift_selection_set(&selection_before, &edits, active.document.len_chars());
-                active.document.set_selection(next_selection);
-                let selection_after = active.document.selection().clone();
-                active.history.record(EditTransaction {
-                    edits,
-                    selection_before,
-                    selection_after,
-                });
-            }
+        planned_edits.sort_by_key(|(start, end, _)| (*start, *end));
+
+        let active = self.buffers.active_mut();
+        let mut edits = Vec::with_capacity(planned_edits.len());
+        for (start, end, replacement) in planned_edits.into_iter().rev() {
+            let edit = active.document.apply_raw_edit(start, end, &replacement)?;
+            edits.push(edit);
         }
+
+        let new_ranges: Vec<Selection> = plans
+            .into_iter()
+            .map(|plan| {
+                let (base_start, inserted_chars) = match plan {
+                    CursorEnterPlan::ClearLine { line_start } => (line_start, 0),
+                    CursorEnterPlan::Insert {
+                        start,
+                        inserted_chars,
+                    } => (start, inserted_chars),
+                };
+                let delta: isize = edits
+                    .iter()
+                    .filter(|edit| edit.start < base_start)
+                    .map(|edit| {
+                        edit.inserted.chars().count() as isize - (edit.end - edit.start) as isize
+                    })
+                    .sum();
+                let shifted_start = (base_start as isize + delta).max(0) as usize;
+                Selection::point(shifted_start + inserted_chars)
+            })
+            .collect();
+
+        let mut next_selection =
+            SelectionSet::from_ranges_with_primary(new_ranges, selection_before.primary_index());
+        next_selection.clamp(active.document.len_chars());
+        active.document.set_selection(next_selection);
+
+        let selection_after = active.document.selection().clone();
+        active.history.record(EditTransaction {
+            edits,
+            selection_before,
+            selection_after,
+        });
         Ok(())
     }
 
@@ -1628,5 +1661,71 @@ mod tests {
 
         bullet_editor.dispatch(Action::Escape).unwrap();
         assert_eq!(bullet_editor.buffers.active().document.selection().len(), 1);
+    }
+
+    #[test]
+    fn mixed_multicursor_enter_handles_clear_and_insert_lines_together() {
+        // Case 1: primary cursor on empty bullet (index 0), secondary on normal text (index 1).
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("- \nhello");
+        let initial_sel = SelectionSet::from_ranges_with_primary(
+            vec![Selection::point(2), Selection::point(8)],
+            0,
+        );
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(initial_sel.clone());
+
+        editor.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "\nhello\n");
+        assert_eq!(editor.buffers.active().document.selection().len(), 2);
+        assert_eq!(
+            editor.buffers.active().document.selection().primary_index(),
+            0
+        );
+        assert_eq!(
+            editor.buffers.active().document.selection().ranges(),
+            &[Selection::point(0), Selection::point(7)]
+        );
+
+        editor.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "- \nhello");
+        assert_eq!(editor.buffers.active().document.selection(), &initial_sel);
+
+        // Case 2: primary cursor on normal text (index 1), secondary on empty bullet (index 0).
+        let mut editor2 = EditorState::new(AppConfig::default()).unwrap();
+        editor2.insert_text("- \nhello");
+        let initial_sel2 = SelectionSet::from_ranges_with_primary(
+            vec![Selection::point(2), Selection::point(8)],
+            1,
+        );
+        editor2
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(initial_sel2.clone());
+
+        editor2.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(editor2.buffers.active().document.text(), "\nhello\n");
+        assert_eq!(editor2.buffers.active().document.selection().len(), 2);
+        assert_eq!(
+            editor2
+                .buffers
+                .active()
+                .document
+                .selection()
+                .primary_index(),
+            1
+        );
+        assert_eq!(
+            editor2.buffers.active().document.selection().ranges(),
+            &[Selection::point(0), Selection::point(7)]
+        );
+
+        editor2.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor2.buffers.active().document.text(), "- \nhello");
+        assert_eq!(editor2.buffers.active().document.selection(), &initial_sel2);
     }
 }
