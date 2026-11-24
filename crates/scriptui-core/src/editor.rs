@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::buffer::BufferEdit;
 use crate::buffers::{BufferManager, CloseResult};
 use crate::config::AppConfig;
 use crate::error::{ScriptuiError, ScriptuiResult};
@@ -841,7 +842,7 @@ impl EditorState {
     }
 
     fn handle_insert_newline(&mut self) -> ScriptuiResult<()> {
-        let (pos, current_line, in_code_block) = {
+        let (current_line, in_code_block, clear_lines) = {
             let doc = &self.buffers.active().document;
             let text = doc.text();
             let pos = doc.char_to_position(doc.selection().primary().head);
@@ -851,7 +852,29 @@ impl EditorState {
                 offset: pos.line,
                 len: doc.len_lines(),
             })?;
-            (pos, current_line, in_code_block)
+
+            let mut candidate_lines: Vec<usize> = doc
+                .selection()
+                .ranges()
+                .iter()
+                .map(|sel| doc.char_to_position(sel.head).line)
+                .collect();
+            candidate_lines.sort_unstable();
+            candidate_lines.dedup();
+
+            let mut clear_lines = Vec::new();
+            for line in candidate_lines {
+                let line_in_code = gfm.is_line_in_code_block(line).is_some();
+                if let Some(line_text) = doc.line_text(line) {
+                    if compute_enter_indent(&line_text, line_in_code, self.config.indent)
+                        == EnterOutcome::ClearCurrentLine
+                    {
+                        clear_lines.push((line, line_text.chars().count()));
+                    }
+                }
+            }
+
+            (current_line, in_code_block, clear_lines)
         };
 
         match compute_enter_indent(&current_line, in_code_block, self.config.indent) {
@@ -861,18 +884,19 @@ impl EditorState {
             EnterOutcome::ClearCurrentLine => {
                 let active = self.buffers.active_mut();
                 let selection_before = active.document.selection().clone();
-                let line_start = active.document.position_to_char(Position {
-                    line: pos.line,
-                    col: 0,
-                });
-                let line_end = line_start + current_line.chars().count();
-                let edit = active.document.apply_raw_edit(line_start, line_end, "")?;
-                active
-                    .document
-                    .set_selection(SelectionSet::point(line_start));
+                let mut edits = Vec::with_capacity(clear_lines.len());
+                for (line, line_len) in clear_lines.into_iter().rev() {
+                    let line_start = active.document.position_to_char(Position { line, col: 0 });
+                    let line_end = line_start + line_len;
+                    let edit = active.document.apply_raw_edit(line_start, line_end, "")?;
+                    edits.push(edit);
+                }
+                let next_selection =
+                    shift_selection_set(&selection_before, &edits, active.document.len_chars());
+                active.document.set_selection(next_selection);
                 let selection_after = active.document.selection().clone();
                 active.history.record(EditTransaction {
-                    edits: vec![edit],
+                    edits,
                     selection_before,
                     selection_after,
                 });
@@ -897,46 +921,48 @@ impl EditorState {
         let indent_cfg = self.config.indent;
         let active = self.buffers.active_mut();
         let selection_before = active.document.selection().clone();
-        let primary = selection_before.primary();
-        let start_pos = active.document.char_to_position(primary.start());
-        let end_pos = active.document.char_to_position(primary.end());
-        let start_line = start_pos.line;
-        let end_line = if !primary.is_empty() && end_pos.col == 0 && end_pos.line > start_line {
-            end_pos.line - 1
-        } else {
-            end_pos.line
-        };
 
-        let edits = if indent {
-            indent_lines(&mut active.document, start_line, end_line, indent_cfg)?
-        } else {
-            dedent_lines(&mut active.document, start_line, end_line, indent_cfg)?
-        };
+        let mut line_ranges: Vec<(usize, usize)> = selection_before
+            .ranges()
+            .iter()
+            .map(|sel| {
+                let start_pos = active.document.char_to_position(sel.start());
+                let end_pos = active.document.char_to_position(sel.end());
+                let start_line = start_pos.line;
+                let end_line = if !sel.is_empty() && end_pos.col == 0 && end_pos.line > start_line {
+                    end_pos.line - 1
+                } else {
+                    end_pos.line
+                };
+                (start_line, end_line)
+            })
+            .collect();
+        line_ranges.sort_unstable();
 
-        let max_len = active.document.len_chars() as isize;
-        let shift_offset = |offset: usize| -> usize {
-            let delta: isize = edits
-                .iter()
-                .filter(|edit| edit.start <= offset)
-                .map(|edit| {
-                    let inserted_len = edit.inserted.chars().count() as isize;
-                    let deleted_len = (edit.end - edit.start) as isize;
-                    if offset < edit.end {
-                        inserted_len - (offset - edit.start) as isize
-                    } else {
-                        inserted_len - deleted_len
-                    }
-                })
-                .sum();
-            (offset as isize + delta).clamp(0, max_len) as usize
-        };
-        let new_anchor = shift_offset(primary.anchor);
-        let new_head = shift_offset(primary.head);
-        active
-            .document
-            .set_selection(SelectionSet::from_ranges(vec![Selection::new(
-                new_anchor, new_head,
-            )]));
+        let mut merged_ranges: Vec<(usize, usize)> = Vec::with_capacity(line_ranges.len());
+        for (start, end) in line_ranges {
+            if let Some((_, last_end)) = merged_ranges.last_mut() {
+                if start <= *last_end + 1 {
+                    *last_end = (*last_end).max(end);
+                    continue;
+                }
+            }
+            merged_ranges.push((start, end));
+        }
+
+        let mut edits = Vec::new();
+        for (start_line, end_line) in merged_ranges.into_iter().rev() {
+            let range_edits = if indent {
+                indent_lines(&mut active.document, start_line, end_line, indent_cfg)?
+            } else {
+                dedent_lines(&mut active.document, start_line, end_line, indent_cfg)?
+            };
+            edits.extend(range_edits);
+        }
+
+        let next_selection =
+            shift_selection_set(&selection_before, &edits, active.document.len_chars());
+        active.document.set_selection(next_selection);
 
         let selection_after = active.document.selection().clone();
         active.history.record(EditTransaction {
@@ -949,71 +975,112 @@ impl EditorState {
 
     fn move_primary_selection(&mut self, motion: CursorMove, extend: bool) {
         let doc = &mut self.buffers.active_mut().document;
-        let primary = doc.selection().primary();
+        let selection_before = doc.selection().clone();
         let len_chars = doc.len_chars();
         let len_lines = doc.len_lines();
-        let head_pos = doc.char_to_position(primary.head);
 
-        let new_head = match motion {
-            CursorMove::Left => primary.head.saturating_sub(1),
-            CursorMove::Right => (primary.head + 1).min(len_chars),
-            CursorMove::Up => {
-                if head_pos.line > 0 {
-                    doc.position_to_char(Position {
-                        line: head_pos.line - 1,
-                        col: head_pos.col,
-                    })
-                } else {
-                    0
-                }
-            }
-            CursorMove::Down => {
-                if head_pos.line + 1 < len_lines {
-                    doc.position_to_char(Position {
-                        line: head_pos.line + 1,
-                        col: head_pos.col,
-                    })
-                } else {
-                    len_chars
-                }
-            }
-            CursorMove::Home => doc.position_to_char(Position {
-                line: head_pos.line,
-                col: 0,
-            }),
-            CursorMove::End => {
-                let line_len = doc
-                    .line_text(head_pos.line)
-                    .map_or(0, |line| line.chars().count());
-                doc.position_to_char(Position {
-                    line: head_pos.line,
-                    col: line_len,
-                })
-            }
-            CursorMove::PageUp => {
-                let target_line = head_pos.line.saturating_sub(PAGE_MOVE_LINES);
-                doc.position_to_char(Position {
-                    line: target_line,
-                    col: head_pos.col,
-                })
-            }
-            CursorMove::PageDown => {
-                let target_line =
-                    (head_pos.line + PAGE_MOVE_LINES).min(len_lines.saturating_sub(1));
-                doc.position_to_char(Position {
-                    line: target_line,
-                    col: head_pos.col,
-                })
-            }
-        };
+        let next_ranges: Vec<Selection> = selection_before
+            .ranges()
+            .iter()
+            .map(|sel| {
+                let head_pos = doc.char_to_position(sel.head);
+                let new_head = match motion {
+                    CursorMove::Left => sel.head.saturating_sub(1),
+                    CursorMove::Right => (sel.head + 1).min(len_chars),
+                    CursorMove::Up => {
+                        if head_pos.line > 0 {
+                            doc.position_to_char(Position {
+                                line: head_pos.line - 1,
+                                col: head_pos.col,
+                            })
+                        } else {
+                            0
+                        }
+                    }
+                    CursorMove::Down => {
+                        if head_pos.line + 1 < len_lines {
+                            doc.position_to_char(Position {
+                                line: head_pos.line + 1,
+                                col: head_pos.col,
+                            })
+                        } else {
+                            len_chars
+                        }
+                    }
+                    CursorMove::Home => doc.position_to_char(Position {
+                        line: head_pos.line,
+                        col: 0,
+                    }),
+                    CursorMove::End => {
+                        let line_len = doc
+                            .line_text(head_pos.line)
+                            .map_or(0, |line| line.chars().count());
+                        doc.position_to_char(Position {
+                            line: head_pos.line,
+                            col: line_len,
+                        })
+                    }
+                    CursorMove::PageUp => {
+                        let target_line = head_pos.line.saturating_sub(PAGE_MOVE_LINES);
+                        doc.position_to_char(Position {
+                            line: target_line,
+                            col: head_pos.col,
+                        })
+                    }
+                    CursorMove::PageDown => {
+                        let target_line =
+                            (head_pos.line + PAGE_MOVE_LINES).min(len_lines.saturating_sub(1));
+                        doc.position_to_char(Position {
+                            line: target_line,
+                            col: head_pos.col,
+                        })
+                    }
+                };
 
-        let next_selection = if extend {
-            Selection::new(primary.anchor, new_head)
-        } else {
-            Selection::point(new_head)
-        };
-        doc.set_selection(SelectionSet::from_ranges(vec![next_selection]));
+                if extend {
+                    Selection::new(sel.anchor, new_head)
+                } else {
+                    Selection::point(new_head)
+                }
+            })
+            .collect();
+
+        doc.set_selection(SelectionSet::from_ranges_with_primary(
+            next_ranges,
+            selection_before.primary_index(),
+        ));
     }
+}
+
+fn shift_selection_set(
+    selection_before: &SelectionSet,
+    edits: &[BufferEdit],
+    max_len: usize,
+) -> SelectionSet {
+    let max_len = max_len as isize;
+    let shift_offset = |offset: usize| -> usize {
+        let delta: isize = edits
+            .iter()
+            .filter(|edit| edit.start <= offset)
+            .map(|edit| {
+                let inserted_len = edit.inserted.chars().count() as isize;
+                let deleted_len = (edit.end - edit.start) as isize;
+                if offset < edit.end {
+                    inserted_len - (offset - edit.start) as isize
+                } else {
+                    inserted_len - deleted_len
+                }
+            })
+            .sum();
+        (offset as isize + delta).clamp(0, max_len) as usize
+    };
+
+    let new_ranges: Vec<Selection> = selection_before
+        .ranges()
+        .iter()
+        .map(|sel| Selection::new(shift_offset(sel.anchor), shift_offset(sel.head)))
+        .collect();
+    SelectionSet::from_ranges_with_primary(new_ranges, selection_before.primary_index())
 }
 
 #[cfg(test)]
@@ -1503,5 +1570,63 @@ mod tests {
             .expect("fallback should record a warning in status_message");
         assert!(warning.contains("nonexistent_theme"));
         assert!(warning.contains("zz_ZZ"));
+    }
+
+    #[test]
+    fn multi_cursor_preserved_across_indent_move_and_clear_line() {
+        let mut editor = EditorState::new(AppConfig::default()).unwrap();
+        editor.insert_text("alpha\nbeta");
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![
+                Selection::point(0),
+                Selection::point(6),
+            ]));
+
+        editor.dispatch(Action::Indent).unwrap();
+        assert_eq!(
+            editor.buffers.active().document.text(),
+            "    alpha\n    beta"
+        );
+        assert_eq!(editor.buffers.active().document.selection().len(), 2);
+        assert_eq!(
+            editor.buffers.active().document.selection().ranges(),
+            &[Selection::point(4), Selection::point(14)]
+        );
+
+        editor.dispatch(Action::MoveRight).unwrap();
+        assert_eq!(editor.buffers.active().document.selection().len(), 2);
+        assert_eq!(
+            editor.buffers.active().document.selection().ranges(),
+            &[Selection::point(5), Selection::point(15)]
+        );
+
+        editor.dispatch(Action::Dedent).unwrap();
+        assert_eq!(editor.buffers.active().document.text(), "alpha\nbeta");
+        assert_eq!(editor.buffers.active().document.selection().len(), 2);
+
+        let mut bullet_editor = EditorState::new(AppConfig::default()).unwrap();
+        bullet_editor.insert_text("- \n- ");
+        bullet_editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::from_ranges(vec![
+                Selection::point(2),
+                Selection::point(5),
+            ]));
+
+        bullet_editor.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(bullet_editor.buffers.active().document.text(), "\n");
+        assert_eq!(bullet_editor.buffers.active().document.selection().len(), 2);
+        assert_eq!(
+            bullet_editor.buffers.active().document.selection().ranges(),
+            &[Selection::point(0), Selection::point(1)]
+        );
+
+        bullet_editor.dispatch(Action::Escape).unwrap();
+        assert_eq!(bullet_editor.buffers.active().document.selection().len(), 1);
     }
 }

@@ -62,10 +62,14 @@ impl SelectionSet {
     }
 
     pub fn from_ranges(ranges: Vec<Selection>) -> Self {
+        Self::from_ranges_with_primary(ranges, 0)
+    }
+
+    pub fn from_ranges_with_primary(ranges: Vec<Selection>, primary: usize) -> Self {
         if ranges.is_empty() {
             return Self::point(0);
         }
-        let mut set = Self { ranges, primary: 0 };
+        let mut set = Self { ranges, primary };
         set.normalize();
         set
     }
@@ -79,6 +83,10 @@ impl SelectionSet {
             .get(self.primary)
             .copied()
             .unwrap_or(Selection::point(0))
+    }
+
+    pub fn primary_index(&self) -> usize {
+        self.primary
     }
 
     pub fn len(&self) -> usize {
@@ -111,10 +119,19 @@ impl SelectionSet {
             return;
         }
 
-        self.ranges.sort_by_key(|sel| (sel.start(), sel.end()));
+        let primary_idx = self.primary.min(self.ranges.len() - 1);
+        let mut tagged: Vec<(Selection, bool)> = self
+            .ranges
+            .drain(..)
+            .enumerate()
+            .map(|(idx, sel)| (sel, idx == primary_idx))
+            .collect();
 
-        let mut merged: Vec<Selection> = Vec::with_capacity(self.ranges.len());
-        for next in self.ranges.drain(..) {
+        tagged.sort_by_key(|(sel, _)| (sel.start(), sel.end()));
+
+        let mut merged: Vec<Selection> = Vec::with_capacity(tagged.len());
+        let mut new_primary = 0usize;
+        for (next, is_primary) in tagged {
             if let Some(last) = merged.last_mut() {
                 let overlaps = next.start() < last.end()
                     || (next.start() == last.end() && (last.is_empty() || next.is_empty()));
@@ -131,16 +148,24 @@ impl SelectionSet {
                     } else {
                         Selection::new(start, end)
                     };
+                    if is_primary {
+                        new_primary = merged.len() - 1;
+                    }
                     continue;
                 }
+            }
+            if is_primary {
+                new_primary = merged.len();
             }
             merged.push(next);
         }
 
         self.ranges = merged;
-        if self.primary >= self.ranges.len() {
-            self.primary = self.ranges.len().saturating_sub(1);
-        }
+        self.primary = if self.ranges.is_empty() {
+            0
+        } else {
+            new_primary
+        };
     }
 }
 
@@ -190,5 +215,29 @@ mod tests {
         assert_eq!(set.ranges()[0], Selection::new(5, 10));
         set.collapse_to_primary();
         assert_eq!(set.primary(), Selection::point(10));
+    }
+
+    #[test]
+    fn normalize_remaps_primary_across_sort_and_merge() {
+        // Primary starts at index 0 with a higher offset; after sorting it moves to index 1.
+        let sorted = SelectionSet::from_ranges(vec![Selection::new(10, 12), Selection::new(2, 4)]);
+        assert_eq!(sorted.len(), 2);
+        assert_eq!(sorted.primary(), Selection::new(10, 12));
+        assert_eq!(sorted.primary_index(), 1);
+
+        // Primary starts at index 0 (12..16), sorts after 2..4, and merges into 10..16 at index 1.
+        let merged = SelectionSet::from_ranges_with_primary(
+            vec![
+                Selection::new(12, 16),
+                Selection::new(2, 4),
+                Selection::new(10, 14),
+            ],
+            0,
+        );
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged.ranges()[0], Selection::new(2, 4));
+        assert_eq!(merged.ranges()[1], Selection::new(10, 16));
+        assert_eq!(merged.primary(), Selection::new(10, 16));
+        assert_eq!(merged.primary_index(), 1);
     }
 }
