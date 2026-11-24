@@ -860,7 +860,7 @@ impl EditorState {
                 Vec::with_capacity(selection_before.len());
             let mut cleared_lines = HashSet::new();
 
-            for sel in selection_before.ranges() {
+            for (idx, sel) in selection_before.ranges().iter().enumerate() {
                 let sel_start = sel.start().min(len_chars);
                 let sel_end = sel.end().min(len_chars);
                 let line = doc.char_to_position(sel.head.min(len_chars)).line;
@@ -874,10 +874,28 @@ impl EditorState {
                     EnterOutcome::ClearCurrentLine => {
                         let line_start = doc.position_to_char(Position { line, col: 0 });
                         let line_end = line_start + line_text.chars().count();
-                        if cleared_lines.insert(line) {
-                            planned_edits.push((line_start, line_end, String::new()));
+                        let overlapped_by_other = selection_before.ranges().iter().enumerate().any(
+                            |(other_idx, other)| {
+                                if other_idx == idx {
+                                    return false;
+                                }
+                                let other_start = other.start().min(len_chars);
+                                let other_end = other.end().min(len_chars);
+                                other_start < line_end && other_end > line_start
+                            },
+                        );
+                        if sel.is_empty() && !overlapped_by_other {
+                            if cleared_lines.insert(line) {
+                                planned_edits.push((line_start, line_end, String::new()));
+                            }
+                            plans.push(CursorEnterPlan::ClearLine { line_start });
+                        } else {
+                            planned_edits.push((sel_start, sel_end, "\n".to_string()));
+                            plans.push(CursorEnterPlan::Insert {
+                                start: sel_start,
+                                inserted_chars: 1,
+                            });
                         }
-                        plans.push(CursorEnterPlan::ClearLine { line_start });
                     }
                     EnterOutcome::Insert(insert_text) => {
                         let inserted_chars = insert_text.chars().count();
@@ -896,6 +914,24 @@ impl EditorState {
         planned_edits.sort_by_key(|(start, end, _)| (*start, *end));
 
         let active = self.buffers.active_mut();
+        let len_chars = active.document.len_chars();
+        let mut prev_end = 0usize;
+        for (idx, (start, end, _)) in planned_edits.iter().enumerate() {
+            if *start > *end || *end > len_chars {
+                return Err(ScriptuiError::OutOfBounds {
+                    offset: (*start).max(*end),
+                    len: len_chars,
+                });
+            }
+            if idx > 0 && prev_end > *start {
+                return Err(ScriptuiError::OutOfBounds {
+                    offset: *start,
+                    len: len_chars,
+                });
+            }
+            prev_end = *end;
+        }
+
         let mut edits = Vec::with_capacity(planned_edits.len());
         for (start, end, replacement) in planned_edits.into_iter().rev() {
             let edit = active.document.apply_raw_edit(start, end, &replacement)?;
@@ -1727,5 +1763,64 @@ mod tests {
         editor2.dispatch(Action::Undo).unwrap();
         assert_eq!(editor2.buffers.active().document.text(), "- \nhello");
         assert_eq!(editor2.buffers.active().document.selection(), &initial_sel2);
+    }
+
+    #[test]
+    fn insert_newline_multicursor_overlapping_clear_line_and_selection_is_atomic() {
+        // Case A: backward selection spanning into empty bullet line + point cursor at end of it.
+        let mut editor_a = EditorState::new(AppConfig::default()).unwrap();
+        editor_a.insert_text("hello\n- ");
+        let sel_a = SelectionSet::from_ranges_with_primary(
+            vec![Selection::new(7, 2), Selection::point(8)],
+            0,
+        );
+        editor_a
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(sel_a.clone());
+
+        editor_a.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(editor_a.buffers.active().document.text(), "he\n \n");
+
+        editor_a.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor_a.buffers.active().document.text(), "hello\n- ");
+        assert_eq!(editor_a.buffers.active().document.selection(), &sel_a);
+
+        // Case B: point cursor at start of empty bullet line + selection starting inside it.
+        let mut editor_b = EditorState::new(AppConfig::default()).unwrap();
+        editor_b.insert_text("- \nhello");
+        let sel_b = SelectionSet::from_ranges_with_primary(
+            vec![Selection::point(0), Selection::new(1, 5)],
+            0,
+        );
+        editor_b
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(sel_b.clone());
+
+        editor_b.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(editor_b.buffers.active().document.text(), "\n-\nllo");
+        assert_eq!(
+            editor_b.buffers.active().document.selection().ranges(),
+            &[Selection::point(1), Selection::point(3)]
+        );
+
+        editor_b.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor_b.buffers.active().document.text(), "- \nhello");
+        assert_eq!(editor_b.buffers.active().document.selection(), &sel_b);
+
+        // Case C: single non-empty selection ending on empty bullet line.
+        let mut editor_c = EditorState::new(AppConfig::default()).unwrap();
+        editor_c.insert_text("hello\n- ");
+        let sel_c = SelectionSet::from_ranges(vec![Selection::new(2, 8)]);
+        editor_c.buffers.active_mut().document.set_selection(sel_c);
+
+        editor_c.dispatch(Action::InsertNewline).unwrap();
+        assert_eq!(editor_c.buffers.active().document.text(), "he\n");
+
+        editor_c.dispatch(Action::Undo).unwrap();
+        assert_eq!(editor_c.buffers.active().document.text(), "hello\n- ");
     }
 }
