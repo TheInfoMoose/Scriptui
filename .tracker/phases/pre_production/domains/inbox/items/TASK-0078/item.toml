@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0078"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-24T15:19:07Z"
-updated_at = "2026-11-24T15:19:07Z"
+updated_at = "2026-11-24T18:48:31Z"
 source_ref = "STEP 14B"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0078@2026-11-24T18:45:30Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-24"
+commit = "aed0790"
+summary = "STEP 14B: Preserve `SelectionSet::primary_index` in `DocumentBuffer` Edits & Test `MAX_FILE_BYTES` (phased check PASS)"
