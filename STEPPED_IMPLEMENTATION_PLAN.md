@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 16):** Fix Phase 15 review regression (`BUG-0043`) so multiple point cursors on the same empty list/blockquote continuation line clear the line cleanly in `handle_insert_newline`.
+**Phase goal (Phase 17):** Resolve Phase 11 medium audit bugs `BUG-0030` (atomic CRLF deletion, viewport combining-mark and wide-char cursor rendering, and C0/C1 control-character sanitization in chrome/preview/modals) and `BUG-0031` (GFM duplicate autolinks, unclosed fences, reference link definitions, CRLF front matter, ASCII-digit spellcheck tokens, and `PersonalDictionary`/ignored-word persistence and locale-switch preservation).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,7 +28,11 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 16A** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | — |
+| 1 | **STEP 17A** | `/goal` | core | `crates/scriptui-core/src/buffer.rs` | — |
+| 2 | **STEP 17B** | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs` | — |
+| 3 | **STEP 17C** | `/goal` | tui | `crates/scriptui-tui/src/chrome.rs`, `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/modals.rs` | — |
+| 4 | **STEP 17D** | `/goal` | core | `crates/scriptui-core/src/markdown.rs` | — |
+| 5 | **STEP 17E** | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/editor.rs` | — |
 
 ### Completed
 
@@ -100,6 +104,7 @@
 | **STEP 15A** | Done (`7f8259d`) | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs` |
 | **STEP 15B** | Done (`53e831a`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
 | **STEP 15C** | Done (`78d8ea7`) | `/goal` | ci | `.github/workflows/release.yml` |
+| **STEP 16A** | Done (`3295889`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
 
 ### Future phases
 
@@ -1846,6 +1851,261 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn insert_newline_multicursor_point_cursors_on_empty_continuation_line_clear_cleanly' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+## Phase 17 Step Blocks
+
+### STEP 17A: Atomic CRLF Deletion in `DocumentBuffer::apply_delete`
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0030`
+
+```text
+[STEP_ID]
+STEP 17A: Treat `\r\n` pairs atomically during point-cursor backward and forward deletion in `DocumentBuffer::apply_delete`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/buffer.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/selection.rs:1-140 (Selection, SelectionSet)
+  - crates/scriptui-core/src/editor.rs:970-1005 (handle_delete caller)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change `apply_insert`, `apply_raw_edit`, or non-empty range deletion semantics.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pressing Backspace or Delete on a point cursor adjacent to a `\r\n` line ending removes the entire `\r\n` pair as a single atomic `BufferEdit`, preventing orphaned `\r` or `\n` characters.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/buffer.rs` (`DocumentBuffer::apply_delete(&mut self, backward: bool) -> Vec<BufferEdit>`):
+     - For a point selection (`start == end`) with `backward == true`: if `start >= 2` and `self.rope.char(start - 2) == '\r'` and `self.rope.char(start - 1) == '\n'`, delete `(start - 2, start)` so both characters are removed in one `BufferEdit` with `removed == "\r\n"`. Otherwise preserve `(start - 1, start)` (or `(0, 0)` at offset 0).
+     - For a point selection (`start == end`) with `backward == false`: if `start + 1 < len_chars` and `self.rope.char(start) == '\r'` and `self.rope.char(start + 1) == '\n'`, delete `(start, start + 2)` so both characters are removed in one `BufferEdit` with `removed == "\r\n"`. Otherwise preserve `(start, start + 1)` (or `(len_chars, len_chars)` at EOF).
+     - Non-empty selections (`start < end`) continue deleting their exact `(start, end)` span unchanged.
+     - If multiple cursors produce overlapping or duplicate deletion spans (for example, one cursor between `\r` and `\n` and another immediately after `\n`), merge overlapping non-empty spans before removing in reverse order so `rope.remove` never panics and cursor shifts remain accurate.
+     - Resulting `BufferEdit` entries remain ordered so undo/redo restores `\r\n` atomically.
+
+Must still work:
+  - LF (`\n`) backward and forward deletion, standalone `\r` deletion, non-empty selection deletion, multi-cursor deletion, `dirty` and `revision` updates, and undo/redo in `EditorState`.
+
+Drops: none
+
+Tests:
+  - `apply_delete_backward_and_forward_remove_crlf_atomically`: exercise `DocumentBuffer::apply_delete` on `"ab\r\ncd"` with point cursor at offset 4 (`backward = true`) -> `"abcd"`, `removed == "\r\n"`, cursor at 2; `"ab\r\ncd"` with point cursor at offset 2 (`backward = false`) -> `"abcd"`, `removed == "\r\n"`, cursor at 2; standalone `"a\rb"` and `"a\nb"` still delete 1 char; multi-cursor at offsets 3 and 4 deleting backward removes `"\r\n"` cleanly without panicking.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn apply_delete_backward_and_forward_remove_crlf_atomically\b' crates/scriptui-core/src/buffer.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17B: Viewport Combining-Mark Rendering and Wide-Char Cursor Handling
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0030`
+
+```text
+[STEP_ID]
+STEP 17B: Attach Unicode combining marks to their preceding visible cell and style all visible cells of wide-character cursors in `render_editor_viewport`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/viewport.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/layout.rs:140-175 (char_display_width, logical_to_visual_cells)
+  - crates/scriptui-core/src/buffer.rs:240-290 (char_to_position, line_text)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change gutter width calculations, soft-wrap layout algorithms, or mouse hit-testing signatures.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Unicode combining marks (such as `e\u{0301}`) render attached to their base cell instead of disappearing, and cursors positioned on wide characters (such as CJK or emoji) highlight all visible cells of the glyph without overflowing narrow viewports.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/viewport.rs` (`render_editor_viewport` character loop):
+     - Track the screen coordinate `(x, y)` of the most recently rendered visible base character cell on the current visual line (reset on each visual line and cleared whenever a base character is offscreen or skipped).
+     - When `w == 0`: if `!ch.is_control()`, append `ch` onto the existing symbol of the last rendered visible cell on that visual line (preserving its style) instead of dropping `ch`. Zero-width control characters (`ch.is_control()`) remain skipped and do not attach to cells.
+     - When a wide character (`w >= 2`) straddles the right viewport boundary (`display_col >= h_scroll`, `display_col < h_scroll + visible_width`, and `display_col + w > h_scroll + visible_width`), clear the partial cell(s) within `text_area` (space with `style`) so no stale glyph remains.
+  2. `crates/scriptui-tui/src/viewport.rs` (`render_editor_viewport` cursor overlay loop):
+     - Determine the display width `cursor_w` of the character at `sel.head` on the logical line (defaulting to `1` at EOL/EOF or for control/zero-width characters; otherwise `char_display_width(ch, vis_col, tab_width).max(1)`).
+     - Style every visible cell in `screen_x..(screen_x + cursor_w)` that lies strictly inside `text_area` (`x < text_area.right()`) with `cursor_style` so wide-character cursors highlight both columns when fully visible and clamp safely at narrow viewport edges without out-of-bounds access.
+
+Must still work:
+  - Narrow viewports (`2x2`, `10x4`), long lines with soft-wrap and horizontal scroll (`h_scroll > 0`), tab indent guides, multi-cursor rendering, and existing `viewport_renders_*` tests.
+
+Drops: none
+
+Tests:
+  - `viewport_attaches_combining_marks_and_styles_wide_char_cursor_cells`: render `"e\u{0301} 漢a"` through `render_editor_viewport` on `TestBackend` with cursor on `'漢'` -> cell at `'e'` has symbol `"e\u{0301}"`, both cells of `'漢'` have `cursor_style` (`fg == cursor_fg`, `bg == cursor_bg`), and rendering a narrow viewport where `'漢'` straddles the right edge of `text_area` completes without panicking or overflowing `text_area`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn viewport_attaches_combining_marks_and_styles_wide_char_cursor_cells\b' crates/scriptui-tui/src/viewport.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17C: Sanitize C0/C1 Control Characters in Chrome, Preview Pane, and Modals
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0030`
+
+```text
+[STEP_ID]
+STEP 17C: Sanitize C0/C1 control characters before rendering untrusted strings in `chrome.rs`, `preview_pane.rs`, and `modals.rs`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/chrome.rs
+  - crates/scriptui-tui/src/preview_pane.rs
+  - crates/scriptui-tui/src/modals.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/app.rs:140-210 (render_frame callers)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not alter key-handling behavior, modal dimensions for clean ASCII strings, or preview caching invariants.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Untrusted filenames, status messages, Markdown preview segments, spellcheck diagnostics/suggestions, and file prompt inputs cannot inject raw C0/C1 control bytes (`\x1b`, `\r`, `\n`, `\x07`, `\x08`, `\x9b`, etc.) into Ratatui `Span` or `Block` titles.
+
+Contract & Behavior:
+  1. Sanitization rule (applied consistently across all three modules):
+     - Replace `'\t'` with `' '` and replace every other character matching `ch.is_control()` (U+0000..=U+001F and U+007F..=U+009F) with `'?'`. Printable characters (ASCII and Unicode) pass through unchanged.
+  2. `crates/scriptui-tui/src/chrome.rs`:
+     - In `render_tab_bar`, sanitize `buf.display_name()` before formatting/truncating tab labels and computing `tab_width`.
+     - In `render_status_bar`, sanitize `active.display_name()`, `state.status_message`, `locale_str`, and `theme_str` before rendering spans.
+  3. `crates/scriptui-tui/src/preview_pane.rs`:
+     - In `render_preview_pane`, sanitize each `seg.text` before constructing `Span::styled(...)`.
+  4. `crates/scriptui-tui/src/modals.rs`:
+     - In `render_spell_quick_fix`, sanitize `popup.diagnostic.word` (for title and personal/ignore action labels) and every suggestion string before computing modal width and rendering spans.
+     - In `render_file_prompt`, sanitize `state.file_prompt_input` before constructing `Span::styled(...)`.
+
+Must still work:
+  - Clean ASCII/UTF-8 tab bar, status bar, preview pane `[SYNC]` rendering, spell quick-fix modal, and file prompt modal at standard and narrow viewport sizes (including `20x1` status/tab bar and `24x6` modals with long text).
+
+Drops: none
+
+Tests:
+  - `chrome_sanitizes_control_chars_in_tabs_and_status_bar` (in `chrome.rs`): render a tab whose filename contains `"\x1b[31mred\x07\r.md"` and a `status_message` containing `"warn\x1b[2J\x08\x9b!"` at both `80x1` and `20x1` -> no cell in the rendered `TestBackend` buffer contains any `ch.is_control()`, while printable substrings (`red`, `warn`) remain rendered.
+  - `preview_pane_sanitizes_control_chars_in_segments` (in `preview_pane.rs`): render a document containing `"\x1b[31mhello\x07\x9b"` via `render_preview_pane` -> no rendered cell contains any `ch.is_control()`, while `"hello"` is rendered.
+  - `modals_sanitize_control_chars_in_spell_and_file_prompts` (in `modals.rs`): render `SpellQuickFix` with word/suggestion containing `"\x1b[31m"` and `OpenFilePrompt` with `file_prompt_input` containing `"/tmp/a\x1b[2J\x07b.md"` at both `60x10` and `24x6` -> no rendered cell contains any `ch.is_control()`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn chrome_sanitizes_control_chars_in_tabs_and_status_bar\b' crates/scriptui-tui/src/chrome.rs && grep -qE 'fn preview_pane_sanitizes_control_chars_in_segments\b' crates/scriptui-tui/src/preview_pane.rs && grep -qE 'fn modals_sanitize_control_chars_in_spell_and_file_prompts\b' crates/scriptui-tui/src/modals.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17D: Fix GFM Parsing Edge Cases in `markdown.rs`
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0031`
+
+```text
+[STEP_ID]
+STEP 17D: Fix duplicate autolinks, unclosed fenced code block bounds, reference link definition spellcheck skipping, and CRLF front matter byte ranges in `parse_gfm`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/markdown.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/tests/markdown_spell_pipeline.rs:1-85 (full GFM + spell pipeline assertions)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change public struct definitions (`MdTokenKind`, `MdSpan`, `CodeBlockRegion`, `GfmDocument`) or `gfm_options` feature flags.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: `parse_gfm` accurately locates repeated autolinks, preserves body lines of unclosed fenced code blocks at EOF, skips reference link definitions from spellcheck, and computes exact byte spans and line offsets for CRLF front matter.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/markdown.rs` (duplicate autolinks):
+     - Maintain a monotonic search cursor within the enclosing block (or document) when locating synthetic-sourcepos GFM autolinks so repeated identical autolinks (e.g., two occurrences of `https://example.com/a` in the same paragraph) each resolve to their own distinct byte range, emitting separate `MdTokenKind::Link` spans and `spell_skip_byte_ranges` entries.
+  2. `crates/scriptui-core/src/markdown.rs` (unclosed fenced code blocks at EOF):
+     - For `NodeValue::CodeBlock(cb)` with `cb.fenced == true`, inspect the source text of `span.end_line` to verify whether it is a valid closing fence (up to 3 leading spaces, at least 3 repeated backticks `` ` `` or tildes `~` matching the fence character, and only optional trailing whitespace). Only set `body_end = span.end_line - 1` when `span.end_line` is a closing fence; otherwise keep `body_end = span.end_line` and `body_start = (span.start_line + 1).min(span.end_line)`.
+  3. `crates/scriptui-core/src/markdown.rs` (reference link definitions):
+     - Scan document lines outside code blocks and front matter for CommonMark reference link definitions (up to 3 leading spaces, `[non-empty label]:`, optional whitespace, non-empty destination URL or `<...>` destination, optional title) and add their source byte ranges to `spell_skip_byte_ranges` so URLs and reference labels are excluded from spellcheck.
+  4. `crates/scriptui-core/src/markdown.rs` (CRLF front matter):
+     - For `NodeValue::FrontMatter(raw)`, compute the original source byte range from `self.line_index` using the front matter line count (`self.line_offset`) rather than `raw.len()`, so CRLF (`\r\n`) front matter spans its full original byte range (including all `\r` bytes and the closing `---` line) in both `MdTokenKind::FrontMatter` and `spell_skip_byte_ranges`, while subsequent AST nodes keep accurate 0-based line numbers.
+
+Must still work:
+  - Closed fenced code blocks, indented code blocks, single autolinks, LF front matter, GFM alerts, tables, task lists, and `markdown_spell_pipeline` integration tests.
+
+Drops: none
+
+Tests:
+  - `parse_gfm_handles_duplicate_autolinks_unclosed_fence_ref_defs_and_crlf_front_matter`: exercise `parse_gfm` on (a) `"Visit https://example.com/a and https://example.com/a"` -> 2 distinct `MdTokenKind::Link` spans at different columns and both byte ranges skipped; (b) `"```rust\nlet x = 1;\nlet y = 2;"` -> `code_blocks[0]` has `start_line == 1`, `end_line == 2`, `language == "rust"`, and `is_line_in_code_block(2).is_some()`; (c) `"[docs]: https://example.com/wrld\n\nSee [docs].\n"` -> byte range of the reference definition line is covered by `spell_skip_byte_ranges`; (d) `"---\r\ntitle: wrld\r\n---\r\n# Heading\r\n"` -> `MdTokenKind::FrontMatter` spans lines `0..=2`, `spell_skip_byte_ranges` covers the full CRLF front matter bytes through the closing `---`, and `MdTokenKind::Heading(1)` is on line `3`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn parse_gfm_handles_duplicate_autolinks_unclosed_fence_ref_defs_and_crlf_front_matter\b' crates/scriptui-core/src/markdown.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 17E: Wire `PersonalDictionary` Persistence, Preserve User Words Across Locale Switch, and Support ASCII Digits in Spellcheck Tokens
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0031`
+
+```text
+[STEP_ID]
+STEP 17E: Align spellcheck tokenization with Hunspell ASCII-digit `WORDCHARS`, wire `PersonalDictionary` load/save in `EditorState`, and preserve personal and ignored words across `switch_spell_locale`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/spell.rs
+  - crates/scriptui-core/src/editor.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/assets/dicts/en_US.aff:1-20 (WORDCHARS 0123456789)
+  - crates/scriptui-tui/src/app.rs:83-113 (EditorState::new_with_dirs caller)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change `EditorState::new` or `EditorState::new_with_dirs` method signatures or `PersonalDictionary::load_from_file` / `save_to_file` signatures.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Spellchecking keeps alphanumeric tokens like `"1st"` and `"utf8"` intact without flagging pure numbers, `EditorState` loads and persists `personal.dic` automatically in the configured dictionary directory, and switching spellcheck locales preserves both personal-dictionary and session-ignored words.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/spell.rs`:
+     - Update `is_word_char` to accept ASCII digits (`ch.is_alphabetic() || ch.is_ascii_digit() || is_apostrophe(ch)`).
+     - In `SpellEngine::check_document`, skip any token that contains no alphabetic characters (e.g. `"2026"`, `"42"`) so pure numeric tokens are not flagged as misspellings, while alphanumeric words (`"1st"`, `"2nd"`, `"utf8"`) are checked as single tokens rather than split at digits.
+     - Add public accessors/transfer methods on `SpellEngine`:
+       - `pub fn personal(&self) -> &PersonalDictionary`
+       - `pub fn set_personal(&mut self, personal: PersonalDictionary)`
+       - `pub fn copy_user_words_from(&mut self, other: &SpellEngine)` — merges all words from `other.personal` and `other.ignored` into `self` without removing words already in `self`.
+  2. `crates/scriptui-core/src/editor.rs`:
+     - Store `personal_dict_path: Option<PathBuf>` on `EditorState`, set in `EditorState::new_with_dirs` to `dict_dirs.first().map(|dir| dir.join("personal.dic"))` (`None` when `dict_dirs` is empty).
+     - In `EditorState::new_with_dirs`: when `spell_engine` is `Some` and `personal_dict_path` points to an existing file (`path.is_file()`), load it via `PersonalDictionary::load_from_file(&path)` and attach it via `engine.set_personal(...)`. On load error, append a non-fatal warning to `warnings` and continue with an empty `PersonalDictionary`.
+     - In `EditorState::add_spell_popup_word_to_personal_dict(&mut self) -> bool`: after adding the word to `engine.personal_mut()`, if `self.personal_dict_path` is `Some(path)`, persist via `engine.personal().save_to_file(path)`. If saving fails, keep the in-memory word added, set `self.status_message` to a descriptive warning, and still return `true`.
+     - In `EditorState::switch_spell_locale(&mut self, locale: &str, search_dirs: &[PathBuf]) -> ScriptuiResult<()>`: before assigning `self.spell_engine = Some(engine)`, if `self.spell_engine` is `Some(ref prev)`, call `engine.copy_user_words_from(prev)` so personal and session-ignored words survive locale switches.
+
+Must still work:
+  - `EditorState::new`, `EditorState::new_with_dirs`, `SpellEngine::default_en_us`, `SpellEngine::load_locale`, curly apostrophes (`don’t`), all-caps acronyms (`GFM`), `replace_active_and_all_and_spell_dict_helpers`, and `markdown_spell_pipeline`.
+
+Drops: none
+
+Tests:
+  - `spell_handles_ascii_digit_tokens_without_flagging_pure_numbers` (in `spell.rs`): `SpellEngine::default_en_us().check_document("1st 2nd 2026 utf8", &[])` -> `"1st"`, `"2nd"`, and `"2026"` produce zero diagnostics, and any diagnostic for `"utf8"` reports `word == "utf8"` (not `"utf"`).
+  - `editor_persists_personal_dictionary_and_preserves_words_across_locale_switch` (in `editor.rs`): construct `EditorState::new_with_dirs` with a temp `dict_dir`, add `"xyzzyword"` via `open_spell_quick_fix_at_cursor` + `add_spell_popup_word_to_personal_dict`, ignore `"quuxword"` via `ignore_spell_popup_word` -> `dict_dir/personal.dic` exists on disk, a fresh `EditorState::new_with_dirs` with the same `dict_dir` loads `"xyzzyword"` and does not flag it, and calling `switch_spell_locale("en_US", &[dict_dir])` on the original editor preserves both `"xyzzyword"` and `"quuxword"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn spell_handles_ascii_digit_tokens_without_flagging_pure_numbers\b' crates/scriptui-core/src/spell.rs && grep -qE 'fn editor_persists_personal_dictionary_and_preserves_words_across_locale_switch\b' crates/scriptui-core/src/editor.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
