@@ -264,8 +264,25 @@ impl SpellEngine {
         &self.locale
     }
 
+    pub fn personal(&self) -> &PersonalDictionary {
+        &self.personal
+    }
+
     pub fn personal_mut(&mut self) -> &mut PersonalDictionary {
         &mut self.personal
+    }
+
+    pub fn set_personal(&mut self, personal: PersonalDictionary) {
+        self.personal = personal;
+    }
+
+    pub fn copy_user_words_from(&mut self, other: &SpellEngine) {
+        for word in &other.personal.words {
+            self.personal.add(word);
+        }
+        for word in &other.ignored {
+            self.ignore_word(word);
+        }
     }
 
     pub fn ignore_word(&mut self, word: &str) {
@@ -353,6 +370,10 @@ impl SpellEngine {
             let word = &text[byte_start..byte_end];
 
             if word.chars().count() <= 1 {
+                return;
+            }
+
+            if !word.chars().any(char::is_alphabetic) {
                 return;
             }
 
@@ -513,20 +534,23 @@ fn is_apostrophe(ch: char) -> bool {
 }
 
 fn is_word_char(ch: char) -> bool {
-    ch.is_alphabetic() || is_apostrophe(ch)
+    ch.is_alphabetic() || ch.is_ascii_digit() || is_apostrophe(ch)
 }
 
 fn is_all_caps_acronym(word: &str) -> bool {
     let mut alpha_count = 0usize;
+    let mut has_digit = false;
     for ch in word.chars() {
         if ch.is_alphabetic() {
             if !ch.is_uppercase() {
                 return false;
             }
             alpha_count += 1;
+        } else if ch.is_ascii_digit() {
+            has_digit = true;
         }
     }
-    alpha_count >= 2
+    alpha_count >= 2 || (alpha_count >= 1 && has_digit)
 }
 
 fn overlaps_any(range: Range<usize>, skip_ranges: &[Range<usize>]) -> bool {
@@ -729,5 +753,20 @@ mod tests {
             import_locale_files("it_IT", &dic_src, &aff_src, dest_existing.path()).unwrap_err();
         assert!(matches!(err, ScriptuiError::Io { .. }));
         assert_eq!(fs::read_to_string(&prior_dic).unwrap(), "1\nprecedente\n");
+    }
+
+    #[test]
+    fn spell_handles_ascii_digit_tokens_without_flagging_pure_numbers() {
+        let engine = SpellEngine::default_en_us().unwrap();
+        assert!(engine.check_document("1st 2nd 2026", &[]).is_empty());
+
+        let diags = engine.check_document("1st 2nd 2026 utf8", &[]);
+        for diag in &diags {
+            assert_ne!(diag.word, "1st");
+            assert_ne!(diag.word, "2nd");
+            assert_ne!(diag.word, "2026");
+            assert_ne!(diag.word, "utf");
+            assert_eq!(diag.word, "utf8");
+        }
     }
 }

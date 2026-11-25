@@ -14,7 +14,7 @@ use crate::search::{
     find_all, next_match, prev_match, select_all_occurrences, SearchMatch, SearchQuery,
 };
 use crate::selection::{Position, Selection, SelectionSet};
-use crate::spell::{SpellDiagnostic, SpellEngine};
+use crate::spell::{PersonalDictionary, SpellDiagnostic, SpellEngine};
 use crate::theme::{default_theme, resolve_theme, Theme};
 
 const PAGE_MOVE_LINES: usize = 20;
@@ -235,6 +235,7 @@ pub struct EditorState {
     pub palette: CommandPaletteState,
     pub spell_popup: Option<SpellQuickFixState>,
     pub spell_engine: Option<SpellEngine>,
+    personal_dict_path: Option<PathBuf>,
     pub file_prompt_input: String,
     pub status_message: Option<String>,
     pub should_quit: bool,
@@ -265,7 +266,8 @@ impl EditorState {
                 default_theme()?
             }
         };
-        let spell_engine = if config.spell_enabled {
+        let personal_dict_path = dict_dirs.first().map(|dir| dir.join("personal.dic"));
+        let mut spell_engine = if config.spell_enabled {
             if config.spell_locale.is_empty() || config.spell_locale == "en_US" {
                 SpellEngine::default_en_us().ok()
             } else {
@@ -283,6 +285,17 @@ impl EditorState {
         } else {
             None
         };
+        if let (Some(engine), Some(path)) = (&mut spell_engine, &personal_dict_path) {
+            if path.is_file() {
+                match PersonalDictionary::load_from_file(path) {
+                    Ok(personal) => engine.set_personal(personal),
+                    Err(err) => warnings.push(format!(
+                        "Personal dictionary '{}' could not be loaded: {err}",
+                        path.display()
+                    )),
+                }
+            }
+        }
         let status_message = if warnings.is_empty() {
             None
         } else {
@@ -300,6 +313,7 @@ impl EditorState {
             palette: CommandPaletteState::default(),
             spell_popup: None,
             spell_engine,
+            personal_dict_path,
             file_prompt_input: String::new(),
             status_message,
             should_quit: false,
@@ -474,7 +488,10 @@ impl EditorState {
         locale: &str,
         search_dirs: &[PathBuf],
     ) -> ScriptuiResult<()> {
-        let engine = SpellEngine::load_locale(locale, search_dirs)?;
+        let mut engine = SpellEngine::load_locale(locale, search_dirs)?;
+        if let Some(ref prev) = self.spell_engine {
+            engine.copy_user_words_from(prev);
+        }
         self.spell_engine = Some(engine);
         self.config.spell_locale = locale.to_string();
         self.spell_revision = self.spell_revision.wrapping_add(1);
@@ -486,6 +503,14 @@ impl EditorState {
             return false;
         };
         engine.personal_mut().add(&popup.diagnostic.word);
+        if let Some(path) = &self.personal_dict_path {
+            if let Err(err) = engine.personal().save_to_file(path) {
+                self.status_message = Some(format!(
+                    "Added word to session dictionary, but failed to save '{}': {err}",
+                    path.display()
+                ));
+            }
+        }
         self.spell_popup = None;
         self.overlay = OverlayMode::None;
         self.spell_revision = self.spell_revision.wrapping_add(1);
@@ -1853,5 +1878,67 @@ mod tests {
             assert_eq!(editor.buffers.active().document.text(), initial_text);
             assert_eq!(editor.buffers.active().document.selection(), &initial_sel);
         }
+    }
+
+    #[test]
+    fn editor_persists_personal_dictionary_and_preserves_words_across_locale_switch() {
+        let dict_dir = tempfile::tempdir().unwrap();
+        let dict_path = dict_dir.path().to_path_buf();
+
+        let mut editor =
+            EditorState::new_with_dirs(AppConfig::default(), &[], std::slice::from_ref(&dict_path))
+                .unwrap();
+        editor.insert_text("xyzzyword quuxword");
+
+        // Add "xyzzyword" to the personal dictionary via the quick-fix popup.
+        let pos_personal = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 2 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(pos_personal));
+        assert!(editor.open_spell_quick_fix_at_cursor());
+        assert!(editor.add_spell_popup_word_to_personal_dict());
+
+        // Ignore "quuxword" for the session via the quick-fix popup.
+        let pos_ignored = editor
+            .buffers
+            .active()
+            .document
+            .position_to_char(Position { line: 0, col: 12 });
+        editor
+            .buffers
+            .active_mut()
+            .document
+            .set_selection(SelectionSet::point(pos_ignored));
+        assert!(editor.open_spell_quick_fix_at_cursor());
+        assert!(editor.ignore_spell_popup_word());
+
+        // personal.dic must be persisted on disk.
+        let personal_dic = dict_path.join("personal.dic");
+        assert!(personal_dic.is_file());
+
+        // A fresh EditorState using the same dict_dir loads "xyzzyword" and does not flag it.
+        let mut reloaded =
+            EditorState::new_with_dirs(AppConfig::default(), &[], std::slice::from_ref(&dict_path))
+                .unwrap();
+        reloaded.insert_text("xyzzyword quuxword");
+        let (_, reloaded_diags) = reloaded.active_analysis();
+        assert!(!reloaded_diags.iter().any(|d| d.word == "xyzzyword"));
+        assert!(reloaded_diags.iter().any(|d| d.word == "quuxword"));
+
+        // Switching spellcheck locale on the original editor preserves both personal and ignored words.
+        editor
+            .switch_spell_locale("en_US", std::slice::from_ref(&dict_path))
+            .unwrap();
+        let (_, switched_diags) = editor.active_analysis();
+        assert!(
+            switched_diags.is_empty(),
+            "expected personal and ignored words to survive locale switch, got {switched_diags:?}"
+        );
     }
 }
