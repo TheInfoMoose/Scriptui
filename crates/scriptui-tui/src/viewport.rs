@@ -290,15 +290,30 @@ pub fn render_editor_viewport(
         let visual_slice = &styled_chars[slice_start..slice_end];
 
         let mut display_col = 0usize;
+        let mut last_cell: Option<(u16, u16)> = None;
+        let right_edge = h_scroll.saturating_add(visible_width);
         for &(ch, style) in visual_slice {
             let w = char_display_width(ch, display_col, tab_width);
             if w == 0 {
+                if !ch.is_control() {
+                    if let Some(pos) = last_cell {
+                        if let Some(cell) = buf.cell_mut(pos) {
+                            let mut combined = cell.symbol().to_string();
+                            combined.push(ch);
+                            cell.set_symbol(&combined);
+                        }
+                    }
+                }
                 continue;
             }
+            if display_col >= right_edge {
+                break;
+            }
             if ch == '\t' {
+                let mut rendered_cell = None;
                 for step in 0..w {
                     let cell_col = display_col + step;
-                    if cell_col >= h_scroll && cell_col < h_scroll.saturating_add(visible_width) {
+                    if cell_col >= h_scroll && cell_col < right_edge {
                         let x = text_area.x.saturating_add((cell_col - h_scroll) as u16);
                         if let Some(cell) = buf.cell_mut((x, y)) {
                             if step == 0
@@ -315,13 +330,14 @@ pub fn render_editor_viewport(
                                 cell.set_symbol(" ");
                                 cell.set_style(style);
                             }
+                            rendered_cell = Some((x, y));
                         }
                     }
                 }
-            } else if display_col >= h_scroll
-                && display_col.saturating_add(w) <= h_scroll.saturating_add(visible_width)
-            {
+                last_cell = rendered_cell;
+            } else if display_col >= h_scroll && display_col.saturating_add(w) <= right_edge {
                 let x = text_area.x.saturating_add((display_col - h_scroll) as u16);
+                let mut rendered_cell = None;
                 if ch == ' ' && vl.wrap_index == 0 && vl.indent_guides.contains(&display_col) {
                     if let Some(cell) = buf.cell_mut((x, y)) {
                         cell.set_symbol("│");
@@ -330,12 +346,14 @@ pub fn render_editor_viewport(
                                 .fg(muted_fg)
                                 .bg(style.bg.unwrap_or(bg_color)),
                         );
+                        rendered_cell = Some((x, y));
                     }
                 } else {
                     if let Some(cell) = buf.cell_mut((x, y)) {
                         let mut sym = [0u8; 4];
                         cell.set_symbol(ch.encode_utf8(&mut sym));
                         cell.set_style(style);
+                        rendered_cell = Some((x, y));
                     }
                     for cont in 1..w {
                         if let Some(cell) = buf.cell_mut((x.saturating_add(cont as u16), y)) {
@@ -344,11 +362,24 @@ pub fn render_editor_viewport(
                         }
                     }
                 }
+                last_cell = rendered_cell;
+            } else if w >= 2
+                && display_col >= h_scroll
+                && display_col < right_edge
+                && display_col.saturating_add(w) > right_edge
+            {
+                for cell_col in display_col..right_edge {
+                    let x = text_area.x.saturating_add((cell_col - h_scroll) as u16);
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_symbol(" ");
+                        cell.set_style(style);
+                    }
+                }
+                last_cell = None;
+            } else {
+                last_cell = None;
             }
             display_col += w;
-            if display_col >= h_scroll.saturating_add(visible_width) {
-                break;
-            }
         }
     }
 
@@ -366,10 +397,26 @@ pub fn render_editor_viewport(
         if vis_col < h_scroll || vis_col >= h_scroll.saturating_add(visible_width) {
             continue;
         }
+        let cursor_w = active
+            .document
+            .line_text(head_pos.line)
+            .and_then(|line| line.chars().nth(head_pos.col))
+            .map_or(1, |ch| {
+                if ch.is_control() {
+                    1
+                } else {
+                    char_display_width(ch, vis_col, tab_width).max(1)
+                }
+            });
         let screen_x = text_area.x.saturating_add((vis_col - h_scroll) as u16);
         let screen_y = text_area.y.saturating_add((vis_row - scroll_line) as u16);
-        if let Some(cell) = buf.cell_mut((screen_x, screen_y)) {
-            cell.set_style(cursor_style);
+        let cursor_end_x = screen_x
+            .saturating_add(cursor_w.min(u16::MAX as usize) as u16)
+            .min(text_area.right());
+        for x in screen_x..cursor_end_x {
+            if let Some(cell) = buf.cell_mut((x, screen_y)) {
+                cell.set_style(cursor_style);
+            }
         }
     }
 
@@ -568,5 +615,102 @@ mod tests {
         assert_eq!(buf[(tx + 4, row1)].symbol(), "語");
         assert_eq!(buf[(tx + 6, row1)].symbol(), "X");
         assert_eq!(buf[(tx + 6, row1)].bg, cursor_bg);
+    }
+
+    #[test]
+    fn viewport_attaches_combining_marks_and_styles_wide_char_cursor_cells() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        {
+            let active = state.buffers.active_mut();
+            active.document = DocumentBuffer::from_str_content("e\u{0301} 漢a");
+            let wide_offset = active
+                .document
+                .position_to_char(Position { line: 0, col: 3 });
+            active
+                .document
+                .set_selection(SelectionSet::point(wide_offset));
+        }
+
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        let mut metrics = ViewportMetrics {
+            area: Rect::default(),
+            gutter_width: 0,
+            text_area: Rect::default(),
+        };
+
+        let mut frame_buf = ratatui::buffer::Buffer::empty(Rect::default());
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let (m, _) = render_editor_viewport(frame, area, &mut state, true);
+                metrics = m;
+                frame_buf = frame.buffer_mut().clone();
+            })
+            .expect("draw viewport with combining mark and wide cursor");
+
+        let cursor_fg = rgb_to_color(state.theme.palette.cursor_fg);
+        let cursor_bg = rgb_to_color(state.theme.palette.cursor_bg);
+        let tx = metrics.text_area.x;
+        let ty = metrics.text_area.y;
+
+        assert_eq!(frame_buf[(tx, ty)].symbol(), "e\u{0301}");
+        assert_eq!(frame_buf[(tx + 1, ty)].symbol(), " ");
+        assert_eq!(frame_buf[(tx + 2, ty)].symbol(), "漢");
+        assert_eq!(frame_buf[(tx + 2, ty)].fg, cursor_fg);
+        assert_eq!(frame_buf[(tx + 2, ty)].bg, cursor_bg);
+        assert_eq!(frame_buf[(tx + 3, ty)].fg, cursor_fg);
+        assert_eq!(frame_buf[(tx + 3, ty)].bg, cursor_bg);
+        assert_eq!(frame_buf[(tx + 4, ty)].symbol(), "a");
+        assert_ne!(frame_buf[(tx + 4, ty)].bg, cursor_bg);
+
+        let backend_buf = terminal.backend().buffer();
+        assert_eq!(backend_buf[(tx, ty)].symbol(), "e\u{0301}");
+        assert_eq!(backend_buf[(tx + 2, ty)].symbol(), "漢");
+        assert_eq!(backend_buf[(tx + 2, ty)].fg, cursor_fg);
+        assert_eq!(backend_buf[(tx + 2, ty)].bg, cursor_bg);
+
+        let narrow_config = AppConfig {
+            line_numbers: false,
+            soft_wrap: false,
+            ..AppConfig::default()
+        };
+        let mut narrow_state = EditorState::new(narrow_config).expect("narrow editor state");
+        {
+            let active = narrow_state.buffers.active_mut();
+            active.document = DocumentBuffer::from_str_content("e\u{0301} 漢a");
+            let wide_offset = active
+                .document
+                .position_to_char(Position { line: 0, col: 3 });
+            active
+                .document
+                .set_selection(SelectionSet::point(wide_offset));
+        }
+
+        let narrow_backend = TestBackend::new(3, 2);
+        let mut narrow_terminal = Terminal::new(narrow_backend).expect("narrow test terminal");
+        let mut narrow_metrics = ViewportMetrics {
+            area: Rect::default(),
+            gutter_width: 0,
+            text_area: Rect::default(),
+        };
+
+        narrow_terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let (m, _) = render_editor_viewport(frame, area, &mut narrow_state, false);
+                narrow_metrics = m;
+            })
+            .expect("draw narrow viewport where wide char straddles right edge");
+
+        assert_eq!(narrow_metrics.text_area.width, 3);
+        let narrow_buf = narrow_terminal.backend().buffer();
+        let ntx = narrow_metrics.text_area.x;
+        let nty = narrow_metrics.text_area.y;
+        assert_eq!(narrow_buf[(ntx, nty)].symbol(), "e\u{0301}");
+        assert_eq!(narrow_buf[(ntx + 1, nty)].symbol(), " ");
+        assert_eq!(narrow_buf[(ntx + 2, nty)].symbol(), " ");
+        assert_eq!(narrow_buf[(ntx + 2, nty)].fg, cursor_fg);
+        assert_eq!(narrow_buf[(ntx + 2, nty)].bg, cursor_bg);
     }
 }
