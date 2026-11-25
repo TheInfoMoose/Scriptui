@@ -336,6 +336,13 @@ status = "pending"
 severity = "low"
 created_at = "2026-11-25T04:11:08Z"
 
+[[items.bugs]]
+id = "BUG-0048"
+title = "Fix wall-clock 500ms threshold flake in large_file_cached_analysis_and_viewport_render_responsiveness"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T17:47:49Z"
+
 [[items.tasks]]
 id = "TASK-0001"
 title = "core"
@@ -969,7 +976,7 @@ created_at = "2026-11-25T04:08:53Z"
 [[items.tasks]]
 id = "TASK-0091"
 title = "core"
-status = "open"
+status = "pending"
 severity = "medium"
 created_at = "2026-11-25T05:09:22Z"
 
