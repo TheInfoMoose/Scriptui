@@ -304,7 +304,7 @@ created_at = "2026-11-24T19:02:39Z"
 [[items.bugs]]
 id = "BUG-0043"
 title = "handle_insert_newline breaks multiple point cursors on the same empty list/quote line"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-24T19:38:50Z"
 
