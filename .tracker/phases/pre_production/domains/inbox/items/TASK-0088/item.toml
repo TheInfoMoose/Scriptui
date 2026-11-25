@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0088"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-25T03:13:30Z"
-updated_at = "2026-11-25T03:13:30Z"
+updated_at = "2026-11-25T03:36:03Z"
 source_ref = "STEP 17D"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 3
 iteration_count = 1
+last_timer_session = "TASK-0088@2026-11-25T03:32:48Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "35aeb39"
+summary = "STEP 17D: Fix GFM Parsing Edge Cases in `markdown.rs` (phased check PASS)"
