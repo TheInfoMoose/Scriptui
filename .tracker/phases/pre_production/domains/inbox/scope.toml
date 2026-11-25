@@ -213,14 +213,14 @@ created_at = "2026-11-23T14:35:06Z"
 [[items.bugs]]
 id = "BUG-0030"
 title = "Unsanitized C0/C1 control chars in UI chrome/preview/modals and viewport combining-char/wide-cursor/CRLF-delete defects"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
 [[items.bugs]]
 id = "BUG-0031"
 title = "GFM parsing and spellcheck gaps: PersonalDictionary unwired, locale switch drops personal/ignored words, autolink/fence/CRLF/digit edge cases"
-status = "pending"
+status = "closed"
 severity = "medium"
 created_at = "2026-11-23T14:35:06Z"
 
@@ -307,6 +307,34 @@ title = "handle_insert_newline breaks multiple point cursors on the same empty l
 status = "closed"
 severity = "medium"
 created_at = "2026-11-24T19:38:50Z"
+
+[[items.bugs]]
+id = "BUG-0044"
+title = "Closed fenced code blocks in blockquotes or indented list items include closing fence in CodeBlockRegion"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T04:08:38Z"
+
+[[items.bugs]]
+id = "BUG-0045"
+title = "switch_spell_locale after spell_enabled=false startup clobbers existing personal.dic on add"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T04:08:45Z"
+
+[[items.bugs]]
+id = "BUG-0046"
+title = "Control characters unsanitized in find_bar.rs and palette.rs"
+status = "pending"
+severity = "medium"
+created_at = "2026-11-25T04:10:35Z"
+
+[[items.bugs]]
+id = "BUG-0047"
+title = "markdown.rs ref-def heuristic skips paragraph continuations and autolink_cursor misses NodeValue::Image"
+status = "pending"
+severity = "low"
+created_at = "2026-11-25T04:11:08Z"
 
 [[items.tasks]]
 id = "TASK-0001"
@@ -930,3 +958,10 @@ title = "core"
 status = "closed"
 severity = "medium"
 created_at = "2026-11-25T03:13:30Z"
+
+[[items.tasks]]
+id = "TASK-0090"
+title = "Assert non-empty diagnostics in spell_handles_ascii_digit_tokens_without_flagging_pure_numbers"
+status = "pending"
+severity = "low"
+created_at = "2026-11-25T04:08:53Z"

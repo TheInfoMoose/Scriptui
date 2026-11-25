@@ -2,11 +2,11 @@
 id = "BUG-0030"
 type = "bug"
 title = "Unsanitized C0/C1 control chars in UI chrome/preview/modals and viewport combining-char/wide-cursor/CRLF-delete defects"
-status = "pending"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-23T14:35:06Z"
-updated_at = "2026-11-23T14:35:26Z"
+updated_at = "2026-11-25T04:19:52Z"
 
 [effort]
 logged_time_minutes = 0
@@ -14,4 +14,8 @@ iteration_count = 1
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "b5ac857"
+summary = "Resolved in Phase 17 (STEP 17A-17C); sibling find_bar/palette sanitization tracked in BUG-0046"

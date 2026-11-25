@@ -1,0 +1,17 @@
+[item]
+id = "BUG-0046"
+type = "bug"
+title = "Control characters unsanitized in find_bar.rs and palette.rs"
+status = "pending"
+severity = "medium"
+scope_ref = "inbox"
+created_at = "2026-11-25T04:10:35Z"
+updated_at = "2026-11-25T04:11:18Z"
+
+[effort]
+logged_time_minutes = 0
+iteration_count = 1
+
+[history]
+recurrence_count = 0
+previous_fixes = []
