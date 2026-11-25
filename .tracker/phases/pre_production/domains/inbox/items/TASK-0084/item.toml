@@ -4,17 +4,22 @@ schema_version = 2
 id = "TASK-0084"
 type = "task"
 title = "core"
-status = "open"
+status = "closed"
 severity = "medium"
 scope_ref = "inbox"
 created_at = "2026-11-25T01:21:00Z"
-updated_at = "2026-11-25T01:21:00Z"
+updated_at = "2026-11-25T01:40:43Z"
 source_ref = "STEP 16A"
 
 [effort]
-logged_time_minutes = 0
+logged_time_minutes = 1
 iteration_count = 1
+last_timer_session = "TASK-0084@2026-11-25T01:39:03Z"
 
 [history]
 recurrence_count = 0
-previous_fixes = []
+
+[[history.previous_fixes]]
+date = "2026-11-25"
+commit = "3295889"
+summary = "STEP 16A: Allow Multiple Point Cursors on Same Empty Continuation Line in `handle_insert_newline` (phased check PASS)"
