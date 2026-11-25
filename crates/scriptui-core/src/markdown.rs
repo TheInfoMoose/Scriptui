@@ -206,6 +206,18 @@ impl LineIndex {
             Err(idx) => idx.saturating_sub(1),
         }
     }
+
+    fn line_text<'a>(&self, text: &'a str, line: usize) -> Option<&'a str> {
+        let start = *self.line_starts.get(line)?;
+        let len = *self.line_lengths.get(line)?;
+        text.get(start..start + len)
+    }
+
+    fn line_byte_range(&self, line: usize) -> Option<Range<usize>> {
+        let start = *self.line_starts.get(line)?;
+        let len = *self.line_lengths.get(line)?;
+        Some(start..start + len)
+    }
 }
 
 pub fn parse_gfm(markdown: &str) -> GfmDocument {
@@ -218,12 +230,14 @@ pub fn parse_gfm(markdown: &str) -> GfmDocument {
         markdown,
         line_index: &line_index,
         line_offset: 0,
+        autolink_cursor: 0,
         spans: Vec::new(),
         code_blocks: Vec::new(),
         skip_ranges: Vec::new(),
     };
 
     ctx.collect(root, None);
+    collect_reference_link_def_skip_ranges(&mut ctx);
 
     let spell_skip_byte_ranges = merge_ranges(ctx.skip_ranges);
 
@@ -238,6 +252,7 @@ struct CollectCtx<'s> {
     markdown: &'s str,
     line_index: &'s LineIndex,
     line_offset: usize,
+    autolink_cursor: usize,
     spans: Vec<MdSpan>,
     code_blocks: Vec<CodeBlockRegion>,
     skip_ranges: Vec<Range<usize>>,
@@ -295,6 +310,7 @@ impl CollectCtx<'_> {
                         .sourcepos_to_span(sourcepos, offset, MdTokenKind::Link)
                 {
                     let full_range = self.line_index.span_to_byte_range(&span);
+                    self.autolink_cursor = self.autolink_cursor.max(full_range.end);
                     self.spans.push(span);
                     if let Some(url_range) =
                         find_link_url_skip_range(self.markdown, full_range, &link.url)
@@ -303,14 +319,22 @@ impl CollectCtx<'_> {
                     }
                 } else {
                     // comrak assigns synthetic (0, 1, 0, 1) sourcepos to GFM autolinks;
-                    // locate the literal autolink text within the enclosing block's byte range.
+                    // locate the literal autolink text within the enclosing block's byte range
+                    // starting at or after the monotonic autolink cursor.
                     let needle = first_text_child(node).unwrap_or_else(|| link.url.clone());
-                    let search_range = parent_byte_range.unwrap_or(0..self.markdown.len());
+                    let block_range = parent_byte_range.unwrap_or(0..self.markdown.len());
+                    let search_start = self
+                        .autolink_cursor
+                        .max(block_range.start)
+                        .min(block_range.end);
+                    let search_range = search_start..block_range.end;
                     if !needle.is_empty() {
                         if let Some(slice) = self.markdown.get(search_range.clone()) {
                             if let Some(rel) = slice.find(&needle) {
                                 let start = search_range.start + rel;
-                                let range = start..start + needle.len();
+                                let end = start + needle.len();
+                                let range = start..end;
+                                self.autolink_cursor = end;
                                 if let Some(span) = self
                                     .line_index
                                     .byte_range_to_span(range.clone(), MdTokenKind::Link)
@@ -329,6 +353,7 @@ impl CollectCtx<'_> {
                         .sourcepos_to_span(sourcepos, offset, MdTokenKind::InlineCode)
                 {
                     let range = self.line_index.span_to_byte_range(&span);
+                    self.autolink_cursor = self.autolink_cursor.max(range.end);
                     self.spans.push(span);
                     if !range.is_empty() {
                         self.skip_ranges.push(range);
@@ -341,15 +366,30 @@ impl CollectCtx<'_> {
                         .sourcepos_to_span(sourcepos, offset, MdTokenKind::CodeBlock)
                 {
                     let range = self.line_index.span_to_byte_range(&span);
+                    self.autolink_cursor = self.autolink_cursor.max(range.end);
                     let language = cb
                         .info
                         .split_whitespace()
                         .next()
                         .unwrap_or_default()
                         .to_string();
-                    let (body_start, body_end) = if cb.fenced && span.end_line > span.start_line + 1
-                    {
-                        (span.start_line + 1, span.end_line - 1)
+                    let (body_start, body_end) = if cb.fenced {
+                        let has_closing_fence = span.end_line > span.start_line
+                            && self
+                                .line_index
+                                .line_text(self.markdown, span.end_line)
+                                .is_some_and(|line| {
+                                    is_closing_fence(line, cb.fence_char, cb.fence_length)
+                                });
+                        if has_closing_fence {
+                            if span.end_line > span.start_line + 1 {
+                                (span.start_line + 1, span.end_line - 1)
+                            } else {
+                                (span.start_line, span.end_line)
+                            }
+                        } else {
+                            ((span.start_line + 1).min(span.end_line), span.end_line)
+                        }
                     } else {
                         (span.start_line, span.end_line)
                     };
@@ -421,10 +461,24 @@ impl CollectCtx<'_> {
             }
             NodeValue::FrontMatter(raw) => {
                 // comrak strips front matter before parsing the remainder, shifting subsequent lines.
-                self.line_offset = raw.bytes().filter(|&b| b == b'\n').count();
+                let fm_lines = raw.bytes().filter(|&b| b == b'\n').count();
+                self.line_offset = fm_lines;
                 if !raw.is_empty() {
-                    let end = raw.len().min(self.markdown.len());
-                    let range = 0..end;
+                    let end = if raw.ends_with('\n') {
+                        self.line_index
+                            .line_starts
+                            .get(fm_lines)
+                            .copied()
+                            .unwrap_or(self.markdown.len())
+                    } else {
+                        self.line_index
+                            .line_starts
+                            .get(fm_lines + 1)
+                            .copied()
+                            .unwrap_or(self.markdown.len())
+                    };
+                    let range = 0..end.min(self.markdown.len());
+                    self.autolink_cursor = self.autolink_cursor.max(range.end);
                     if let Some(span) = self
                         .line_index
                         .byte_range_to_span(range.clone(), MdTokenKind::FrontMatter)
@@ -442,6 +496,7 @@ impl CollectCtx<'_> {
                         .sourcepos_to_span(sourcepos, offset, MdTokenKind::Html)
                 {
                     let range = self.line_index.span_to_byte_range(&span);
+                    self.autolink_cursor = self.autolink_cursor.max(range.end);
                     self.spans.push(span);
                     if !range.is_empty() {
                         self.skip_ranges.push(range);
@@ -465,6 +520,134 @@ impl CollectCtx<'_> {
             self.collect(child, current_byte_range.clone());
         }
     }
+}
+
+fn is_closing_fence(line: &str, fence_char: u8, fence_length: usize) -> bool {
+    if fence_char != b'`' && fence_char != b'~' {
+        return false;
+    }
+    let leading_spaces = line.bytes().take_while(|&b| b == b' ').count();
+    if leading_spaces > 3 {
+        return false;
+    }
+    let rest = &line[leading_spaces..];
+    let fence_count = rest.bytes().take_while(|&b| b == fence_char).count();
+    if fence_count < fence_length.max(3) {
+        return false;
+    }
+    rest[fence_count..].trim().is_empty()
+}
+
+fn collect_reference_link_def_skip_ranges(ctx: &mut CollectCtx<'_>) {
+    for line in ctx.line_offset..ctx.line_index.line_count() {
+        let in_code_or_front_matter = ctx.spans.iter().any(|span| {
+            matches!(span.kind, MdTokenKind::CodeBlock | MdTokenKind::FrontMatter)
+                && line >= span.start_line
+                && line <= span.end_line
+        });
+        if in_code_or_front_matter {
+            continue;
+        }
+        if let Some(text) = ctx.line_index.line_text(ctx.markdown, line) {
+            if is_reference_link_definition(text) {
+                if let Some(range) = ctx.line_index.line_byte_range(line) {
+                    if !range.is_empty() {
+                        ctx.skip_ranges.push(range);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn is_reference_link_definition(line: &str) -> bool {
+    let leading_spaces = line.bytes().take_while(|&b| b == b' ').count();
+    if leading_spaces > 3 {
+        return false;
+    }
+    let rest = &line[leading_spaces..];
+    let Some(after_open) = rest.strip_prefix('[') else {
+        return false;
+    };
+
+    let bytes = after_open.as_bytes();
+    let mut i = 0;
+    let mut close_idx = None;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => {
+                i += 2;
+                continue;
+            }
+            b'[' => return false,
+            b']' => {
+                if bytes.get(i + 1) == Some(&b':') {
+                    close_idx = Some(i);
+                    break;
+                }
+                return false;
+            }
+            _ => i += 1,
+        }
+    }
+
+    let Some(close_idx) = close_idx else {
+        return false;
+    };
+    let label = &after_open[..close_idx];
+    if label.trim().is_empty() || label.starts_with('^') {
+        return false;
+    }
+
+    let after_colon = after_open[close_idx + 2..].trim_start_matches([' ', '\t']);
+    if after_colon.is_empty() {
+        return false;
+    }
+
+    let after_dest = if let Some(angle_inner) = after_colon.strip_prefix('<') {
+        let angle_bytes = angle_inner.as_bytes();
+        let mut j = 0;
+        let mut end_angle = None;
+        while j < angle_bytes.len() {
+            match angle_bytes[j] {
+                b'\\' => {
+                    j += 2;
+                    continue;
+                }
+                b'<' => return false,
+                b'>' => {
+                    end_angle = Some(j);
+                    break;
+                }
+                _ => j += 1,
+            }
+        }
+        let Some(end_angle) = end_angle else {
+            return false;
+        };
+        if angle_inner[..end_angle].is_empty() {
+            return false;
+        }
+        &angle_inner[end_angle + 1..]
+    } else {
+        let dest_end = after_colon.find([' ', '\t']).unwrap_or(after_colon.len());
+        let dest = &after_colon[..dest_end];
+        if dest.is_empty() || dest.bytes().any(|b| b.is_ascii_control()) {
+            return false;
+        }
+        &after_colon[dest_end..]
+    };
+
+    let trailing = after_dest.trim();
+    if trailing.is_empty() {
+        return true;
+    }
+    if !after_dest.starts_with([' ', '\t']) {
+        return false;
+    }
+    (trailing.len() >= 2 && trailing.starts_with('"') && trailing.ends_with('"'))
+        || (trailing.len() >= 2 && trailing.starts_with('\'') && trailing.ends_with('\''))
+        || (trailing.len() >= 2 && trailing.starts_with('(') && trailing.ends_with(')'))
 }
 
 fn first_text_child<'a>(node: &'a AstNode<'a>) -> Option<String> {
@@ -642,5 +825,74 @@ mod tests {
         assert!(is_covered("misspelled_ident"));
         assert!(is_covered("https://example.com/typo"));
         assert!(!is_covered("Visit"));
+    }
+
+    #[test]
+    fn parse_gfm_handles_duplicate_autolinks_unclosed_fence_ref_defs_and_crlf_front_matter() {
+        // (a) Duplicate autolinks resolve to distinct spans and both byte ranges are skipped.
+        let dup_md = "Visit https://example.com/a and https://example.com/a";
+        let dup_doc = parse_gfm(dup_md);
+        let link_spans: Vec<MdSpan> = dup_doc
+            .spans
+            .iter()
+            .copied()
+            .filter(|s| s.kind == MdTokenKind::Link)
+            .collect();
+        assert_eq!(link_spans.len(), 2);
+        assert_ne!(link_spans[0].start_col, link_spans[1].start_col);
+        assert_eq!(link_spans[0].start_col, 6);
+        assert_eq!(link_spans[0].end_col, 27);
+        assert_eq!(link_spans[1].start_col, 32);
+        assert_eq!(link_spans[1].end_col, 53);
+        assert!(dup_doc
+            .spell_skip_byte_ranges
+            .iter()
+            .any(|r| r.start <= 6 && 27 <= r.end));
+        assert!(dup_doc
+            .spell_skip_byte_ranges
+            .iter()
+            .any(|r| r.start <= 32 && 53 <= r.end));
+
+        // (b) Unclosed fenced code block at EOF preserves body lines through the last line.
+        let unclosed_md = "```rust\nlet x = 1;\nlet y = 2;";
+        let unclosed_doc = parse_gfm(unclosed_md);
+        assert_eq!(unclosed_doc.code_blocks.len(), 1);
+        assert_eq!(unclosed_doc.code_blocks[0].start_line, 1);
+        assert_eq!(unclosed_doc.code_blocks[0].end_line, 2);
+        assert_eq!(unclosed_doc.code_blocks[0].language, "rust");
+        assert!(unclosed_doc.is_line_in_code_block(2).is_some());
+
+        // (c) Reference link definitions are covered by spell_skip_byte_ranges.
+        let ref_md = "[docs]: https://example.com/wrld\n\nSee [docs].\n";
+        let ref_doc = parse_gfm(ref_md);
+        let ref_line = "[docs]: https://example.com/wrld";
+        let ref_start = ref_md.find(ref_line).expect("ref def line in fixture");
+        let ref_end = ref_start + ref_line.len();
+        assert!(ref_doc
+            .spell_skip_byte_ranges
+            .iter()
+            .any(|r| r.start <= ref_start && ref_end <= r.end));
+
+        // (d) CRLF front matter spans its full original byte range and keeps heading on line 3.
+        let crlf_md = "---\r\ntitle: wrld\r\n---\r\n# Heading\r\n";
+        let crlf_doc = parse_gfm(crlf_md);
+        let fm_span = crlf_doc
+            .spans
+            .iter()
+            .find(|s| s.kind == MdTokenKind::FrontMatter)
+            .expect("expected FrontMatter span");
+        assert_eq!(fm_span.start_line, 0);
+        assert_eq!(fm_span.end_line, 2);
+        let fm_end = crlf_md.find("# Heading").expect("heading in CRLF fixture");
+        assert!(crlf_doc
+            .spell_skip_byte_ranges
+            .iter()
+            .any(|r| r.start == 0 && r.end >= fm_end - 2));
+        let heading_span = crlf_doc
+            .spans
+            .iter()
+            .find(|s| s.kind == MdTokenKind::Heading(1))
+            .expect("expected Heading(1) span");
+        assert_eq!(heading_span.start_line, 3);
     }
 }
