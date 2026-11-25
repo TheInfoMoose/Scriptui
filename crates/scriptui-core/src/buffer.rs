@@ -369,11 +369,21 @@ impl DocumentBuffer {
                 if start < end {
                     (start, end)
                 } else if backward {
-                    if start > 0 {
+                    if start >= 2
+                        && self.rope.char(start - 2) == '\r'
+                        && self.rope.char(start - 1) == '\n'
+                    {
+                        (start - 2, start)
+                    } else if start > 0 {
                         (start - 1, start)
                     } else {
                         (0, 0)
                     }
+                } else if start + 1 < len_chars
+                    && self.rope.char(start) == '\r'
+                    && self.rope.char(start + 1) == '\n'
+                {
+                    (start, start + 2)
                 } else if start < len_chars {
                     (start, start + 1)
                 } else {
@@ -382,26 +392,50 @@ impl DocumentBuffer {
             })
             .collect();
 
-        let mut edits = Vec::with_capacity(spans.len());
-        for &(start, end) in spans.iter().rev() {
-            if start < end {
-                let removed = self.rope.slice(start..end).to_string();
-                self.rope.remove(start..end);
-                edits.push(BufferEdit {
-                    start,
-                    end,
-                    inserted: String::new(),
-                    removed,
-                });
+        let mut non_empty: Vec<(usize, usize)> = spans
+            .iter()
+            .copied()
+            .filter(|&(start, end)| start < end)
+            .collect();
+        non_empty.sort_unstable();
+
+        let mut merged_deletes: Vec<(usize, usize)> = Vec::with_capacity(non_empty.len());
+        for (start, end) in non_empty {
+            if let Some((_, last_end)) = merged_deletes.last_mut() {
+                if start < *last_end {
+                    *last_end = (*last_end).max(end);
+                    continue;
+                }
             }
+            merged_deletes.push((start, end));
+        }
+
+        let mut edits = Vec::with_capacity(merged_deletes.len());
+        for &(start, end) in merged_deletes.iter().rev() {
+            let removed = self.rope.slice(start..end).to_string();
+            self.rope.remove(start..end);
+            edits.push(BufferEdit {
+                start,
+                end,
+                inserted: String::new(),
+                removed,
+            });
         }
 
         let mut new_ranges = Vec::with_capacity(spans.len());
-        let mut delta: isize = 0;
-        for &(start, end) in &spans {
-            let caret = (start as isize + delta).max(0) as usize;
-            new_ranges.push(Selection::point(caret));
-            delta -= (end - start) as isize;
+        for &(orig_start, _) in &spans {
+            let mut shift = 0usize;
+            for &(del_start, del_end) in &merged_deletes {
+                if del_end <= orig_start {
+                    shift += del_end - del_start;
+                } else if del_start < orig_start {
+                    shift += orig_start - del_start;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            new_ranges.push(Selection::point(orig_start.saturating_sub(shift)));
         }
 
         self.selection = SelectionSet::from_ranges_with_primary(new_ranges, primary_index);
@@ -625,5 +659,82 @@ mod tests {
             }
             other => panic!("expected ScriptuiError::Io, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn apply_delete_backward_and_forward_remove_crlf_atomically() {
+        let mut buf = DocumentBuffer::from_str_content("ab\r\ncd");
+        buf.set_selection(SelectionSet::point(4));
+        let edits = buf.apply_delete(true);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].start, 2);
+        assert_eq!(edits[0].end, 4);
+        assert_eq!(edits[0].removed, "\r\n");
+        assert_eq!(buf.text(), "abcd");
+        assert_eq!(buf.selection().primary(), Selection::point(2));
+
+        let mut buf = DocumentBuffer::from_str_content("ab\r\ncd");
+        buf.set_selection(SelectionSet::point(2));
+        let edits = buf.apply_delete(false);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].start, 2);
+        assert_eq!(edits[0].end, 4);
+        assert_eq!(edits[0].removed, "\r\n");
+        assert_eq!(buf.text(), "abcd");
+        assert_eq!(buf.selection().primary(), Selection::point(2));
+
+        let mut buf = DocumentBuffer::from_str_content("a\rb");
+        buf.set_selection(SelectionSet::point(2));
+        let edits = buf.apply_delete(true);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\r");
+        assert_eq!(buf.text(), "ab");
+        assert_eq!(buf.selection().primary(), Selection::point(1));
+
+        let mut buf = DocumentBuffer::from_str_content("a\rb");
+        buf.set_selection(SelectionSet::point(1));
+        let edits = buf.apply_delete(false);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\r");
+        assert_eq!(buf.text(), "ab");
+        assert_eq!(buf.selection().primary(), Selection::point(1));
+
+        let mut buf = DocumentBuffer::from_str_content("a\nb");
+        buf.set_selection(SelectionSet::point(2));
+        let edits = buf.apply_delete(true);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\n");
+        assert_eq!(buf.text(), "ab");
+        assert_eq!(buf.selection().primary(), Selection::point(1));
+
+        let mut buf = DocumentBuffer::from_str_content("a\nb");
+        buf.set_selection(SelectionSet::point(1));
+        let edits = buf.apply_delete(false);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\n");
+        assert_eq!(buf.text(), "ab");
+        assert_eq!(buf.selection().primary(), Selection::point(1));
+
+        let mut buf = DocumentBuffer::from_str_content("ab\r\ncd");
+        buf.set_selection(SelectionSet::from_ranges(vec![
+            Selection::point(3),
+            Selection::point(4),
+        ]));
+        let edits = buf.apply_delete(true);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\r\n");
+        assert_eq!(buf.text(), "abcd");
+        assert_eq!(buf.selection().ranges(), &[Selection::point(2)]);
+
+        let mut buf = DocumentBuffer::from_str_content("ab\r\ncd");
+        buf.set_selection(SelectionSet::from_ranges(vec![
+            Selection::point(2),
+            Selection::point(3),
+        ]));
+        let edits = buf.apply_delete(false);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].removed, "\r\n");
+        assert_eq!(buf.text(), "abcd");
+        assert_eq!(buf.selection().ranges(), &[Selection::point(2)]);
     }
 }
