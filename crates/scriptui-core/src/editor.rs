@@ -876,7 +876,7 @@ impl EditorState {
                         let line_end = line_start + line_text.chars().count();
                         let overlapped_by_other = selection_before.ranges().iter().enumerate().any(
                             |(other_idx, other)| {
-                                if other_idx == idx {
+                                if other_idx == idx || other.is_empty() {
                                     return false;
                                 }
                                 let other_start = other.start().min(len_chars);
@@ -1822,5 +1822,36 @@ mod tests {
 
         editor_c.dispatch(Action::Undo).unwrap();
         assert_eq!(editor_c.buffers.active().document.text(), "hello\n- ");
+    }
+
+    #[test]
+    fn insert_newline_multicursor_point_cursors_on_empty_continuation_line_clear_cleanly() {
+        let cases = [
+            ("- ", vec![Selection::point(0), Selection::point(1)]),
+            ("- ", vec![Selection::point(1), Selection::point(2)]),
+            ("  - ", vec![Selection::point(1), Selection::point(2)]),
+        ];
+
+        for (initial_text, ranges) in cases {
+            let mut editor = EditorState::new(AppConfig::default()).unwrap();
+            editor.insert_text(initial_text);
+            let initial_sel = SelectionSet::from_ranges_with_primary(ranges, 0);
+            editor
+                .buffers
+                .active_mut()
+                .document
+                .set_selection(initial_sel.clone());
+
+            editor.dispatch(Action::InsertNewline).unwrap();
+            assert_eq!(editor.buffers.active().document.text(), "");
+            assert_eq!(
+                editor.buffers.active().document.selection().ranges(),
+                &[Selection::point(0)]
+            );
+
+            editor.dispatch(Action::Undo).unwrap();
+            assert_eq!(editor.buffers.active().document.text(), initial_text);
+            assert_eq!(editor.buffers.active().document.selection(), &initial_sel);
+        }
     }
 }
