@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 15):** Fix Phase 14 review defects (`BUG-0041`, `BUG-0042`) and add the tag-triggered + `workflow_dispatch` dry-run GitHub Actions release workflow (`.github/workflows/release.yml`, resolving OQ-2).
+**Phase goal (Phase 16):** Fix Phase 15 review regression (`BUG-0043`) so multiple point cursors on the same empty list/blockquote continuation line clear the line cleanly in `handle_insert_newline`.
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,9 +28,7 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 15A** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs` | — |
-| 2 | **STEP 15B** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | — |
-| 3 | **STEP 15C** | `/goal` | ci | `.github/workflows/release.yml` | — |
+| 1 | **STEP 16A** | `/goal` | core | `crates/scriptui-core/src/editor.rs` | — |
 
 ### Completed
 
@@ -99,6 +97,9 @@
 | **STEP 14B** | Done (`aed0790`) | `/goal` | core | `crates/scriptui-core/src/buffer.rs` |
 | **STEP 14C** | Done (`206333d`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
 | **STEP 14D** | Done (`5167e8d`) | `/goal` | ci | `.github/workflows/ci.yml` |
+| **STEP 15A** | Done (`7f8259d`) | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs` |
+| **STEP 15B** | Done (`53e831a`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
+| **STEP 15C** | Done (`78d8ea7`) | `/goal` | ci | `.github/workflows/release.yml` |
 
 ### Future phases
 
@@ -1799,6 +1800,52 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && python3 -c 'import yaml; d = yaml.safe_load(open(".github/workflows/release.yml")); on = d.get("on", d.get(True)); assert d["name"] == "Release" and "workflow_dispatch" in on and "v*.*.*" in on["push"]["tags"]; targets = {m["target"]: m["os"] for m in d["jobs"]["build"]["strategy"]["matrix"]["include"]}; assert targets == {"x86_64-unknown-linux-gnu": "ubuntu-latest", "aarch64-apple-darwin": "macos-14"}; pub = d["jobs"]["publish"]; assert "refs/tags/v" in pub["if"] and pub["permissions"]["contents"] == "write"' && grep -qE 'cargo build --release --locked --target' .github/workflows/release.yml && grep -qE 'action-gh-release' .github/workflows/release.yml
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 16A: Allow Multiple Point Cursors on Same Empty Continuation Line in `handle_insert_newline`
+
+* **Recommended Command:** `/goal`
+* **Advances:** `BUG-0043`
+
+```text
+[STEP_ID]
+STEP 16A: Guard `overlapped_by_other` in `EditorState::handle_insert_newline` so empty sibling point cursors do not block `ClearCurrentLine`.
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/editor.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/indent.rs:1-80 (EnterOutcome, compute_enter_indent)
+  - crates/scriptui-core/src/selection.rs:1-140 (Selection, SelectionSet::from_ranges_with_primary)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES. Do not change `EnterOutcome` or `compute_enter_indent` semantics, and do not weaken or delete existing `insert_newline_multicursor_overlapping_clear_line_and_selection_is_atomic` assertions.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Pressing Enter (`Action::InsertNewline`) with multiple point (empty) cursors on the same empty list or blockquote continuation line clears the line cleanly to `""` and collapses the cursors to `Selection::point(line_start)`, rather than splitting the marker or leaving `"\n"`.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/editor.rs` (`EditorState::handle_insert_newline`, `EnterOutcome::ClearCurrentLine` branch):
+     - In `overlapped_by_other`, ignore empty sibling selections (`!other.is_empty()` must hold in addition to `other_idx != idx` and `other_start < line_end && other_end > line_start`).
+     - When two or more empty point cursors sit anywhere on the same `ClearCurrentLine` line (at `line_start`, strictly inside `(line_start, line_end)`, or at `line_end`), `overlapped_by_other` evaluates to `false` for each, `cleared_lines.insert(line)` emits a single `(line_start, line_end, String::new())` edit, and `SelectionSet::from_ranges_with_primary` collapses the resulting `Selection::point(line_start)` ranges.
+     - Non-empty sibling selections overlapping `(line_start, line_end)` still set `overlapped_by_other = true` so `ClearCurrentLine` falls back to `"\n"` insertion and `planned_edits` remain disjoint.
+
+Must still work:
+  - `insert_newline_multicursor_overlapping_clear_line_and_selection_is_atomic` (Cases A, B, and C, including undo restoration).
+  - Single-cursor `ClearCurrentLine` on empty list/blockquote lines and `EnterOutcome::Insert` multi-cursor behavior.
+
+Drops: none
+
+Tests:
+  - `insert_newline_multicursor_point_cursors_on_empty_continuation_line_clear_cleanly`: exercise `EditorState::dispatch(Action::InsertNewline)` on (a) `"- "` with `Selection::point(0)` and `Selection::point(1)`, (b) `"- "` with `Selection::point(1)` and `Selection::point(2)`, and (c) `"  - "` with `Selection::point(1)` and `Selection::point(2)` -> each clears the buffer to `""`, collapses selection to `&[Selection::point(0)]`, and restores original text and selection on `Action::Undo`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn insert_newline_multicursor_point_cursors_on_empty_continuation_line_clear_cleanly' crates/scriptui-core/src/editor.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
