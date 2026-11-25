@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use scriptui_core::{EditorState, OverlayMode, ScriptuiResult};
 
+use crate::chrome::sanitize_control_chars;
 use crate::layout_tree::rgb_to_color;
 
 pub fn centered_rect(area: Rect, max_width: u16, max_height: u16) -> Rect {
@@ -27,9 +28,13 @@ pub fn render_spell_quick_fix(frame: &mut Frame, area: Rect, state: &EditorState
         return;
     };
 
-    let word = &popup.diagnostic.word;
+    let word = sanitize_control_chars(&popup.diagnostic.word);
     let title = format!(" Spellcheck: {word} ");
-    let mut items: Vec<String> = popup.suggestions.clone();
+    let mut items: Vec<String> = popup
+        .suggestions
+        .iter()
+        .map(|s| sanitize_control_chars(s))
+        .collect();
     items.push(format!("Add '{word}' to Personal Dictionary"));
     items.push(format!("Ignore '{word}' (Session)"));
 
@@ -263,11 +268,9 @@ pub fn render_file_prompt(frame: &mut Frame, area: Rect, state: &EditorState) {
         return;
     }
 
-    let widget = Paragraph::new(Line::from(Span::styled(
-        state.file_prompt_input.as_str(),
-        base_style,
-    )))
-    .style(base_style);
+    let sanitized_input = sanitize_control_chars(&state.file_prompt_input);
+    let widget =
+        Paragraph::new(Line::from(Span::styled(sanitized_input, base_style))).style(base_style);
     frame.render_widget(widget, inner);
 }
 
@@ -495,5 +498,86 @@ mod tests {
             &mut state,
         ));
         assert_eq!(state.overlay, OverlayMode::None);
+    }
+
+    #[test]
+    fn modals_sanitize_control_chars_in_spell_and_file_prompts() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        state.overlay = OverlayMode::SpellQuickFix;
+        state.spell_popup = Some(scriptui_core::SpellQuickFixState {
+            diagnostic: scriptui_core::SpellDiagnostic {
+                line: 0,
+                col_start: 0,
+                col_end: 8,
+                byte_start: 0,
+                byte_end: 8,
+                word: "\x1b[31mwrld".to_string(),
+            },
+            suggestions: vec!["\x1b[31mworld\x07".to_string()],
+            selected_index: 0,
+        });
+
+        for (width, height) in [(60u16, 10u16), (24u16, 6u16)] {
+            let mut terminal =
+                Terminal::new(TestBackend::new(width, height)).expect("spell test terminal");
+            terminal
+                .draw(|frame| {
+                    render_spell_quick_fix(frame, Rect::new(0, 0, width, height), &state);
+                })
+                .expect("draw spell modal");
+
+            let buf = terminal.backend().buffer();
+            let mut screen = String::new();
+            for y in 0..height {
+                for x in 0..width {
+                    let sym = buf[(x, y)].symbol();
+                    assert!(
+                        !sym.chars().any(char::is_control),
+                        "spell modal cell ({x}, {y}) at {width}x{height} contained control char: {sym:?}"
+                    );
+                    screen.push_str(sym);
+                }
+                screen.push('\n');
+            }
+            if width == 60 {
+                assert!(
+                    screen.contains("world"),
+                    "expected 'world' in spell modal at {width}x{height}:\n{screen}"
+                );
+            }
+        }
+
+        state.overlay = OverlayMode::OpenFilePrompt;
+        state.file_prompt_input = "/tmp/a\x1b[2J\x07b.md".to_string();
+
+        for (width, height) in [(60u16, 10u16), (24u16, 6u16)] {
+            let mut terminal =
+                Terminal::new(TestBackend::new(width, height)).expect("file prompt test terminal");
+            terminal
+                .draw(|frame| {
+                    render_file_prompt(frame, Rect::new(0, 0, width, height), &state);
+                })
+                .expect("draw file prompt modal");
+
+            let buf = terminal.backend().buffer();
+            let mut screen = String::new();
+            for y in 0..height {
+                for x in 0..width {
+                    let sym = buf[(x, y)].symbol();
+                    assert!(
+                        !sym.chars().any(char::is_control),
+                        "file prompt cell ({x}, {y}) at {width}x{height} contained control char: {sym:?}"
+                    );
+                    screen.push_str(sym);
+                }
+                screen.push('\n');
+            }
+            if width == 60 {
+                assert!(
+                    screen.contains("b.md"),
+                    "expected 'b.md' in file prompt at {width}x{height}:\n{screen}"
+                );
+            }
+        }
     }
 }

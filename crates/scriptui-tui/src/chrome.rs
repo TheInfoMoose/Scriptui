@@ -7,6 +7,21 @@ use scriptui_core::{EditorState, IndentStyle, Theme};
 
 use crate::layout_tree::rgb_to_color;
 
+pub(crate) fn sanitize_control_chars(input: &str) -> String {
+    input
+        .chars()
+        .map(|ch| {
+            if ch == '\t' {
+                ' '
+            } else if ch.is_control() {
+                '?'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TabHitbox {
     pub rect: Rect,
@@ -42,7 +57,8 @@ pub fn render_tab_bar(frame: &mut Frame, area: Rect, state: &EditorState) -> Vec
         }
 
         let dirty_marker = if buf.is_dirty() { "*" } else { "" };
-        let full_label = format!(" {}{} ", buf.display_name(), dirty_marker);
+        let sanitized_name = sanitize_control_chars(&buf.display_name());
+        let full_label = format!(" {sanitized_name}{dirty_marker} ");
         let remaining = area_right.saturating_sub(cursor_x) as usize;
         let visible_label: String = full_label.chars().take(remaining).collect();
         let tab_width = visible_label.chars().count().min(u16::MAX as usize) as u16;
@@ -180,13 +196,17 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, state: &EditorState) {
 
     let active = state.buffers.active();
     let dirty_marker = if active.is_dirty() { "*" } else { "" };
-    let left_name = format!(" {}{}", active.display_name(), dirty_marker);
+    let left_name = format!(
+        " {}{}",
+        sanitize_control_chars(&active.display_name()),
+        dirty_marker
+    );
 
     let status_msg = state
         .status_message
         .as_deref()
         .filter(|msg| !msg.is_empty())
-        .map(|msg| format!(" │ {msg}"))
+        .map(|msg| format!(" │ {}", sanitize_control_chars(msg)))
         .unwrap_or_default();
 
     let selection = active.document.selection();
@@ -206,8 +226,8 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, state: &EditorState) {
         IndentStyle::Spaces(w) => format!("SPC {}", w.max(1)),
         IndentStyle::Tabs => "TAB 4".to_string(),
     };
-    let locale_str = state.config.spell_locale.as_str();
-    let theme_str = state.theme.name.as_str();
+    let locale_str = sanitize_control_chars(state.config.spell_locale.as_str());
+    let theme_str = sanitize_control_chars(state.theme.name.as_str());
 
     let right_text = format!(
         "{cursor_str}{multi_cursor_str} │ {wrap_str} │ {indent_str} │ {locale_str} │ {theme_str} "
@@ -331,5 +351,68 @@ mod tests {
         assert!(all_text.contains('◀'));
         assert!(all_text.contains("Ln 1, Col 1"));
         assert!(all_text.contains("crt_amber"));
+    }
+
+    #[test]
+    fn chrome_sanitizes_control_chars_in_tabs_and_status_bar() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        state.buffers.active_mut().document = scriptui_core::DocumentBuffer::empty_with_path(
+            std::path::PathBuf::from("\x1b[31mred\x07\r.md"),
+        );
+        state.status_message = Some("warn\x1b[2J\x08\u{9b}!".to_string());
+
+        for width in [80u16, 20u16] {
+            let mut tab_terminal =
+                Terminal::new(TestBackend::new(width, 1)).expect("tab test terminal");
+            tab_terminal
+                .draw(|frame| {
+                    render_tab_bar(frame, Rect::new(0, 0, width, 1), &state);
+                })
+                .expect("draw tab bar");
+
+            let tab_buf = tab_terminal.backend().buffer();
+            let mut tab_text = String::new();
+            for x in 0..width {
+                let sym = tab_buf[(x, 0)].symbol();
+                assert!(
+                    !sym.chars().any(char::is_control),
+                    "tab bar cell ({x}, 0) at width {width} contained control char: {sym:?}"
+                );
+                tab_text.push_str(sym);
+            }
+            assert!(
+                tab_text.contains("red"),
+                "expected 'red' in tab bar at width {width}, got: {tab_text:?}"
+            );
+
+            let mut status_terminal =
+                Terminal::new(TestBackend::new(width, 1)).expect("status test terminal");
+            status_terminal
+                .draw(|frame| {
+                    render_status_bar(frame, Rect::new(0, 0, width, 1), &state);
+                })
+                .expect("draw status bar");
+
+            let status_buf = status_terminal.backend().buffer();
+            let mut status_text = String::new();
+            for x in 0..width {
+                let sym = status_buf[(x, 0)].symbol();
+                assert!(
+                    !sym.chars().any(char::is_control),
+                    "status bar cell ({x}, 0) at width {width} contained control char: {sym:?}"
+                );
+                status_text.push_str(sym);
+            }
+            if width == 80 {
+                assert!(
+                    status_text.contains("red"),
+                    "expected 'red' in status bar at width {width}, got: {status_text:?}"
+                );
+                assert!(
+                    status_text.contains("warn"),
+                    "expected 'warn' in status bar at width {width}, got: {status_text:?}"
+                );
+            }
+        }
     }
 }

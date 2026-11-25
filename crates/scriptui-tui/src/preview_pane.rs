@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use scriptui_core::{EditorState, PreviewDocument};
 
+use crate::chrome::sanitize_control_chars;
 use crate::layout_tree::{rgb_to_color, segment_to_style};
 
 #[derive(Debug, Clone)]
@@ -131,7 +132,7 @@ pub fn render_preview_pane(
                     if seg.bg.is_none() {
                         style = style.bg(bg_color);
                     }
-                    Span::styled(seg.text.clone(), style)
+                    Span::styled(sanitize_control_chars(&seg.text), style)
                 })
                 .collect();
             Line::from(spans)
@@ -325,5 +326,41 @@ mod tests {
             })
             .expect("repeat draw at (40, 16)");
         assert_eq!(pane_state.rebuild_count(), 4);
+    }
+
+    #[test]
+    fn preview_pane_sanitizes_control_chars_in_segments() {
+        let mut state = EditorState::new(AppConfig::default()).expect("default editor state");
+        state.buffers.active_mut().document =
+            DocumentBuffer::from_str_content("\x1b[31mhello\x07\u{9b}");
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).expect("test terminal");
+        let mut pane_state = PreviewPaneState::default();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render_preview_pane(frame, area, &state, &mut pane_state, 0);
+            })
+            .expect("draw preview pane");
+
+        let buf = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let sym = buf[(x, y)].symbol();
+                assert!(
+                    !sym.chars().any(char::is_control),
+                    "preview pane cell ({x}, {y}) contained control char: {sym:?}"
+                );
+                rendered.push_str(sym);
+            }
+            rendered.push('\n');
+        }
+
+        assert!(
+            rendered.contains("hello"),
+            "expected 'hello' in rendered preview pane:\n{rendered}"
+        );
     }
 }
