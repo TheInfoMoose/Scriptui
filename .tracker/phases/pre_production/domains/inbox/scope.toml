@@ -965,3 +965,24 @@ title = "Assert non-empty diagnostics in spell_handles_ascii_digit_tokens_withou
 status = "pending"
 severity = "low"
 created_at = "2026-11-25T04:08:53Z"
+
+[[items.tasks]]
+id = "TASK-0091"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T05:09:22Z"
+
+[[items.tasks]]
+id = "TASK-0092"
+title = "core"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T05:09:22Z"
+
+[[items.tasks]]
+id = "TASK-0093"
+title = "tui"
+status = "open"
+severity = "medium"
+created_at = "2026-11-25T05:09:22Z"

@@ -20,7 +20,7 @@
 - **Coder (Neon / Orrery `agy-neon-impl`)** executes one step inside `ALLOWED_FILES`. It never commits, never edits this plan or forbidden paths, and files bugs or scope lapses as **pending** Nebulous items.
 - **Two code-fault failures** on one step, or an unamendable scope lapse → the step is deferred (`phased:step_defer`: saves attempt patch, restores step files, parks the task). A step whose `PRE_GATE` fails is deferred without dispatching an agent. Deferrals exceeding `max(2, ⌈steps/3⌉)` stop the phase early.
 
-**Phase goal (Phase 17):** Resolve Phase 11 medium audit bugs `BUG-0030` (atomic CRLF deletion, viewport combining-mark and wide-char cursor rendering, and C0/C1 control-character sanitization in chrome/preview/modals) and `BUG-0031` (GFM duplicate autolinks, unclosed fences, reference link definitions, CRLF front matter, ASCII-digit spellcheck tokens, and `PersonalDictionary`/ignored-word persistence and locale-switch preservation).
+**Phase goal (Phase 18):** Resolve all Phase 17 review follow-ups: `BUG-0044` (closed fenced code blocks inside blockquotes and indented list items), `BUG-0047` (paragraph-continuation reference-link heuristic and `NodeValue::Image` autolink cursor), `BUG-0045` (`switch_spell_locale` loading `personal.dic` after `spell_enabled = false` startup), `TASK-0090` (non-empty diagnostic assertion in `spell.rs`), and `BUG-0046` (C0/C1 control-character sanitization in `find_bar.rs` and `palette.rs`).
 
 **Side findings, bugs and scope lapses** become **pending neb items**, reviewed once at phase end. Every Up Next row has a neb task (`source_ref` = `STEP <ID>`); commits start with `[<TASK-ID>](<scope>)`.
 
@@ -28,11 +28,9 @@
 
 | # | Step | Command | Scope | Target Files | Waits on |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| 1 | **STEP 17A** | `/goal` | core | `crates/scriptui-core/src/buffer.rs` | — |
-| 2 | **STEP 17B** | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs` | — |
-| 3 | **STEP 17C** | `/goal` | tui | `crates/scriptui-tui/src/chrome.rs`, `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/modals.rs` | — |
-| 4 | **STEP 17D** | `/goal` | core | `crates/scriptui-core/src/markdown.rs` | — |
-| 5 | **STEP 17E** | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/editor.rs` | — |
+| 1 | **STEP 18A** | `/goal` | core | `crates/scriptui-core/src/markdown.rs` | — |
+| 2 | **STEP 18B** | `/goal` | core | `crates/scriptui-core/src/editor.rs`, `crates/scriptui-core/src/spell.rs` | — |
+| 3 | **STEP 18C** | `/goal` | tui | `crates/scriptui-tui/src/find_bar.rs`, `crates/scriptui-tui/src/palette.rs` | — |
 
 ### Completed
 
@@ -105,6 +103,11 @@
 | **STEP 15B** | Done (`53e831a`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
 | **STEP 15C** | Done (`78d8ea7`) | `/goal` | ci | `.github/workflows/release.yml` |
 | **STEP 16A** | Done (`3295889`) | `/goal` | core | `crates/scriptui-core/src/editor.rs` |
+| **STEP 17A** | Done (`3b78f12`) | `/goal` | core | `crates/scriptui-core/src/buffer.rs` |
+| **STEP 17B** | Done (`050a8d0`) | `/goal` | tui | `crates/scriptui-tui/src/viewport.rs` |
+| **STEP 17C** | Done (`0e34d8f`) | `/goal` | tui | `crates/scriptui-tui/src/chrome.rs`, `crates/scriptui-tui/src/preview_pane.rs`, `crates/scriptui-tui/src/modals.rs` |
+| **STEP 17D** | Done (`35aeb39`) | `/goal` | core | `crates/scriptui-core/src/markdown.rs` |
+| **STEP 17E** | Done (`e8fe6b6`) | `/goal` | core | `crates/scriptui-core/src/spell.rs`, `crates/scriptui-core/src/editor.rs` |
 
 ### Future phases
 
@@ -2106,6 +2109,166 @@ Tests:
 
 [POST_GATE]
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn spell_handles_ascii_digit_tokens_without_flagging_pure_numbers\b' crates/scriptui-core/src/spell.rs && grep -qE 'fn editor_persists_personal_dictionary_and_preserves_words_across_locale_switch\b' crates/scriptui-core/src/editor.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+
+---
+
+## Phase 18 Step Blocks
+
+### STEP 18A: Fix Nested Closing Fences, Paragraph-Continuation Ref-Defs, and Image Autolink Cursor (`BUG-0044`, `BUG-0047`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 18A: Fix nested closed fenced code blocks (blockquotes/indented list items), prevent paragraph continuations from matching reference-link skip ranges, and advance autolink_cursor past NodeValue::Image in markdown.rs (Advances: BUG-0044, BUG-0047).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/markdown.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/markdown.rs:251-406 (CollectCtx, NodeValue::Link, NodeValue::CodeBlock)
+  - crates/scriptui-core/src/markdown.rs:514-605 (is_closing_fence, collect_reference_link_def_skip_ranges, is_reference_link_definition)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do NOT change public types or signatures in `crates/scriptui-core/src/markdown.rs`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Nested closed fenced code blocks exclude their closing fence from `CodeBlockRegion`, paragraph-continuation lines beginning with `[label]: text` remain spellcheckable, and autolinks following an image with the same URL resolve to the autolink's own span and skip range.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/markdown.rs` — closing fence detection (`BUG-0044`):
+     - When computing `(body_start, body_end)` for a fenced `NodeValue::CodeBlock`, recognize closing fences inside container blocks:
+       - Blockquote-prefixed lines (one or more `>` markers with optional surrounding spaces, e.g., `> ``` ` or `> > ``` `).
+       - Indented list-item lines (leading indentation at or within 3 spaces of the opening fence's container indentation, e.g., `- item\n    ```rust\n    let x = 1;\n    ``` `).
+     - For a closed fenced code block with at least one body line, `CodeBlockRegion.end_line` is `span.end_line - 1` (so `is_line_in_code_block(closing_fence_line)` is `None`).
+     - Unclosed fenced code blocks at EOF (top-level or nested) still keep `CodeBlockRegion.end_line == span.end_line`.
+     - A body line inside an unclosed top-level fenced code block that is indented 4 or more spaces past the opening fence's container (e.g., `    ``` ` inside a column-0 unclosed fence) is NOT treated as a closing fence.
+  2. `crates/scriptui-core/src/markdown.rs` — reference link definition skip ranges (`BUG-0047`):
+     - `collect_reference_link_def_skip_ranges` must NOT add lines that belong to a parsed `NodeValue::Paragraph` AST node (since CommonMark forbids link reference definitions from interrupting a paragraph).
+     - Standalone link reference definitions (not part of a `Paragraph`, `CodeBlock`, or `FrontMatter`) remain covered by `spell_skip_byte_ranges`.
+  3. `crates/scriptui-core/src/markdown.rs` — `NodeValue::Image` autolink cursor (`BUG-0047`):
+     - When `CollectCtx::collect` visits `NodeValue::Image(_)`, advance `self.autolink_cursor` to at least the end byte offset of the image node's `sourcepos` range so a subsequent GFM autolink with the same URL in the same paragraph searches after the image rather than matching the URL inside the image syntax.
+
+Must still work:
+  - Top-level closed fenced code blocks, empty closed fenced code blocks (` ```rust\n``` `), unclosed fenced code blocks at EOF, duplicate GFM autolinks, standalone reference link definitions, CRLF front matter, and all existing `markdown.rs` and `markdown_spell_pipeline` tests.
+
+Drops: none
+
+Tests:
+  - `parse_gfm_excludes_closing_fence_in_blockquotes_and_indented_lists`: parse (a) `"> ```rust\n> let x = 1;\n> ```\n"`, (b) `"- item\n    ```rust\n    let x = 1;\n    ```\n"`, and (c) unclosed top-level `"```rust\nlet x = 1;\n    ```"` -> (a) and (b) report `CodeBlockRegion` covering only the `let x = 1;` body line (`is_line_in_code_block` is `Some("rust")` on the body line and `None` on the closing fence line); (c) keeps `end_line == 2` because the 4-space-indented backticks are body text, not a closing fence.
+  - `parse_gfm_preserves_paragraph_continuation_and_advances_autolink_cursor_past_image`: parse (a) `"See below\n[note]: wrld\n"` -> byte range of `"wrld"` is NOT covered by `spell_skip_byte_ranges`; parse (b) `"![alt](https://example.com/a) https://example.com/a"` -> the `MdTokenKind::Link` span and its `spell_skip_byte_ranges` entry cover the trailing autolink (`start_col == 30`, `end_col == 51`), not the URL inside `![alt](...)`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn parse_gfm_excludes_closing_fence_in_blockquotes_and_indented_lists\b' crates/scriptui-core/src/markdown.rs && grep -qE 'fn parse_gfm_preserves_paragraph_continuation_and_advances_autolink_cursor_past_image\b' crates/scriptui-core/src/markdown.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 18B: Load `personal.dic` on `switch_spell_locale` After Disabled Startup & Tighten Digit Token Test (`BUG-0045`, `TASK-0090`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 18B: Load existing personal.dic in EditorState::switch_spell_locale when spell_engine was None, and add a non-empty diagnostic count assertion in spell.rs (Advances: BUG-0045, TASK-0090).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-core/src/editor.rs
+  - crates/scriptui-core/src/spell.rs
+READ_ONLY_REFS:
+  - crates/scriptui-core/src/editor.rs:269-303 (EditorState::new_with_dirs personal.dic loading)
+  - crates/scriptui-core/src/editor.rs:486-520 (switch_spell_locale, add_spell_popup_word_to_personal_dict)
+  - crates/scriptui-core/src/spell.rs:758-771 (spell_handles_ascii_digit_tokens_without_flagging_pure_numbers)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do NOT change public method signatures on `EditorState` or `SpellEngine`.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Switching spell locale after starting with `spell_enabled = false` preserves existing on-disk `personal.dic` words instead of clobbering them on add, and the ASCII-digit spellcheck test fails if `check_document` returns empty.
+
+Contract & Behavior:
+  1. `crates/scriptui-core/src/editor.rs` — `EditorState::switch_spell_locale` (`BUG-0045`):
+     - If `self.spell_engine` is `Some(ref prev)`, continue copying user words via `engine.copy_user_words_from(prev)`.
+     - If `self.spell_engine` is `None` and `self.personal_dict_path` is `Some(ref path)` where `path.is_file()`, load `PersonalDictionary::load_from_file(path)` and attach it with `engine.set_personal(personal)`.
+     - If `PersonalDictionary::load_from_file(path)` returns an error, do not fail the locale switch; set `self.status_message` to `Some(format!("Personal dictionary '{}' could not be loaded: {err}", path.display()))` and continue with an empty `PersonalDictionary`.
+  2. `crates/scriptui-core/src/spell.rs` — `spell_handles_ascii_digit_tokens_without_flagging_pure_numbers` (`TASK-0090`):
+     - Assert `diags.len() == 1` and `diags[0].word == "utf8"` for `engine.check_document("1st 2nd 2026 utf8", &[])` so the test cannot pass vacuously when `diags` is empty.
+
+Must still work:
+  - `EditorState::new_with_dirs` with `spell_enabled = true` and `spell_enabled = false`, `editor_persists_personal_dictionary_and_preserves_words_across_locale_switch`, `add_spell_popup_word_to_personal_dict`, `ignore_spell_popup_word`, and all existing `spell.rs` tests.
+
+Drops: none
+
+Tests:
+  - `editor_switch_spell_locale_after_disabled_startup_loads_and_preserves_personal_dict` (in `editor.rs`): pre-create `dict_dir/personal.dic` containing `"preexistingword\n"`, initialize `EditorState::new_with_dirs` with `config.spell_enabled = false` and `&[dict_dir]`, call `switch_spell_locale("en_US", &[dict_dir])`, verify `"preexistingword"` is not flagged, then add `"newlyaddedword"` via `open_spell_quick_fix_at_cursor` + `add_spell_popup_word_to_personal_dict` -> `dict_dir/personal.dic` on disk contains both `"preexistingword"` and `"newlyaddedword"`.
+  - `spell_handles_ascii_digit_tokens_without_flagging_pure_numbers` (in `spell.rs`): `engine.check_document("1st 2nd 2026 utf8", &[])` -> `diags.len() == 1` and `diags[0].word == "utf8"`.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn editor_switch_spell_locale_after_disabled_startup_loads_and_preserves_personal_dict\b' crates/scriptui-core/src/editor.rs && grep -qE 'assert_eq!\(diags\.len\(\), 1\)' crates/scriptui-core/src/spell.rs
+
+[HALT_INVARIANT]
+Halt immediately after POST_GATE exits 0 and report verification status.
+```
+
+### STEP 18C: Sanitize C0/C1 Control Characters in Find/Replace Bar and Command Palette (`BUG-0046`)
+
+* **Recommended Command:** `/goal`
+
+```text
+[STEP_ID]
+STEP 18C: Sanitize C0/C1 control characters when rendering find/replace inputs and command palette query and entry labels (Advances: BUG-0046).
+
+[SCOPE_LOCK]
+ALLOWED_FILES:
+  - crates/scriptui-tui/src/find_bar.rs
+  - crates/scriptui-tui/src/palette.rs
+READ_ONLY_REFS:
+  - crates/scriptui-tui/src/chrome.rs:10-23 (sanitize_control_chars)
+  - crates/scriptui-tui/src/find_bar.rs:75-106 (render_find_bar)
+  - crates/scriptui-tui/src/palette.rs:253-275 (render_command_palette)
+FORBIDDEN_SCOPE:
+  - Any file not listed in ALLOWED_FILES.
+  - Do NOT mutate underlying `find_replace.query.pattern`, `find_replace.replacement`, `palette.query`, or `entry.label` data; sanitize only the rendered display strings.
+
+[PRE_GATE]
+true
+
+[MUTATION_SPEC]
+Goal: Rendered cells in the find/replace bar and command palette never contain raw C0 or C1 control characters (`\x1b`, `\x07`, `\u{9b}`, etc.), even when queries, replacements, or dynamic palette labels (such as theme or locale names from disk) contain them.
+
+Contract & Behavior:
+  1. `crates/scriptui-tui/src/find_bar.rs`:
+     - In `render_find_bar`, pass `state.find_replace.query.pattern` and `state.find_replace.replacement` through `crate::chrome::sanitize_control_chars` before constructing `Span::styled`.
+  2. `crates/scriptui-tui/src/palette.rs`:
+     - In `render_command_palette`, pass `state.palette.query` and each rendered `entry.label` through `crate::chrome::sanitize_control_chars` before constructing `Span::styled`.
+  3. Rendering invariants:
+     - Tabs (`\t`) render as spaces and all other `char::is_control()` characters (C0 and C1) render as `?`, matching `chrome.rs`, `modals.rs`, and `preview_pane.rs`.
+     - Narrow viewports and long inputs/labels render cleanly without panicking or leaking raw control characters into any cell of the rendered region.
+
+Must still work:
+  - Find/replace query matching, replacement execution, `handle_find_bar_key`, `filter_palette_entries`, `handle_palette_key`, and all existing `find_bar.rs`, `palette.rs`, and `tui_integration.rs` tests.
+
+Drops: none
+
+Tests:
+  - `find_bar_sanitizes_control_chars_at_standard_and_narrow_widths` (in `find_bar.rs`): render `render_find_bar` in `OverlayMode::Replace` via `TestBackend` at both `80x2` and narrow `20x2` with pattern `"a\x1b[31m\t\u{9b}long_query_text_here"` and replacement `"r\x07\x1b_long_replacement_text"` -> no cell in the rendered buffer contains a control character (`!ch.is_control()`), and at `80x2` the rendered text shows `?` in place of C0/C1 control chars and space in place of `\t` while `state.find_replace.query.pattern` and `state.find_replace.replacement` remain unmodified.
+  - `palette_sanitizes_control_chars_in_query_and_labels_at_standard_and_narrow_widths` (in `palette.rs`): render `render_command_palette` via `TestBackend` at both `60x10` and narrow `24x6` with `state.palette.query = "theme\x1b\u{9b}"` and a `PaletteEntry` whose label is `"theme\x1b\u{9b}\t\x07_long_theme_label_name_for_narrow_clip"` (matching the query so both the query line and the entry row render) -> no cell in the rendered buffer contains a control character (`!ch.is_control()`), and at `60x10` the rendered text shows `?` for C0/C1 control chars and space for `\t` while `state.palette.query` and `entry.label` remain unmodified.
+
+[POST_GATE]
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && grep -qE 'fn find_bar_sanitizes_control_chars_at_standard_and_narrow_widths\b' crates/scriptui-tui/src/find_bar.rs && grep -qE 'fn palette_sanitizes_control_chars_in_query_and_labels_at_standard_and_narrow_widths\b' crates/scriptui-tui/src/palette.rs
 
 [HALT_INVARIANT]
 Halt immediately after POST_GATE exits 0 and report verification status.
